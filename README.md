@@ -7,22 +7,29 @@ The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Co
 ## Table of contents
 
 - [Architecture](#architecture)
+- [Installation options](#installation-options)
+- [Install on Ubuntu Linux (without Kubernetes)](#install-on-ubuntu-linux-without-kubernetes)
+  - [Prerequisites](#prerequisites)
+  - [Step 1 — Clone the repository](#step-1--clone-the-repository)
+  - [Step 2 — Start OpenTelemetry Collector and Prometheus](#step-2--start-opentelemetry-collector-and-prometheus)
+  - [Step 3 — Install and run the Python backend](#step-3--install-and-run-the-python-backend)
+  - [Step 4 — Build the web UI (production)](#step-4--build-the-web-ui-production)
+  - [Step 5 — Use the application](#step-5--use-the-application)
+  - [Optional — Development UI (Vite)](#optional--development-ui-vite)
+  - [Optional — Firewall (UFW)](#optional--firewall-ufw)
+  - [Ubuntu troubleshooting](#ubuntu-troubleshooting)
+- [Install on Kubernetes](#install-on-kubernetes)
+  - [Architecture in the cluster](#architecture-in-the-cluster)
+  - [Prerequisites](#kubernetes-prerequisites)
+  - [Step 1 — Build the backend image](#step-1--build-the-backend-image)
+  - [Step 2 — Deploy the stack](#step-2--deploy-the-stack)
+  - [Step 3 — Open the UI and Prometheus](#step-3--open-the-ui-and-prometheus)
+  - [Step 4 — Use the application](#step-4--use-the-application-on-kubernetes)
+  - [Manifests and overlays](#manifests-and-overlays)
+  - [Kubernetes troubleshooting](#kubernetes-troubleshooting)
 - [Access from other machines](#access-from-other-machines)
 - [API catalog](#api-catalog)
-- [Quick start](#quick-start)
-  - [1. Observability stack](#1-observability-stack)
-  - [2. Python API](#2-python-api)
-  - [3. React UI (development)](#3-react-ui-development)
-  - [4. Production UI (optional)](#4-production-ui-optional)
-- [Workflow](#workflow)
 - [Collector exporters (UI)](#collector-exporters-ui)
-- [Kubernetes installation](#kubernetes-installation)
-  - [Architecture in the cluster](#architecture-in-the-cluster)
-  - [Prerequisites](#prerequisites)
-  - [Quick install](#quick-install)
-  - [Manifests and overlays](#manifests-and-overlays)
-  - [Post-install workflow](#post-install-workflow)
-  - [Customization](#customization)
 - [Repository](#repository)
 - [License](#license)
 
@@ -42,99 +49,184 @@ flowchart LR
 | **Python backend** | Authenticates to BIG-IP, polls selected `/mgmt/...` endpoints, converts nested stats to metric points, pushes OTLP HTTP to the collector |
 | **OTEL Collector** | Receives OTLP; processes with batch/memory_limiter; exposes Prometheus exporter on `:8889` plus any UI-configured exporters |
 | **Prometheus** | Scrapes `otel-collector:8889` to confirm metrics flowed through the collector |
-| **React frontend** | Connection, API catalog, exporter configuration (writes `otel-collector/generated-config.yaml`), export control |
+| **React frontend** | Connection, API catalog, exporter configuration, export control |
 
-## API catalog
+## Installation options
 
-Endpoints are defined in [`data/bigip_apis.csv`](data/bigip_apis.csv) (parsed from your API list — 84 paths, 33 stats/metrics-oriented by default).
+| Method | Best for |
+|--------|----------|
+| **[Ubuntu Linux](#install-on-ubuntu-linux-without-kubernetes)** | Single VM or bare-metal host, Docker for collector/Prometheus, Python for API + UI |
+| **[Kubernetes](#install-on-kubernetes)** | Clusters (EKS, GKE, OpenShift, kind, etc.) |
 
-## Access from other machines
+Both methods run the same components; only packaging and networking differ.
 
-Services listen on **all interfaces** (`0.0.0.0`). Use your host’s LAN IP instead of `127.0.0.1` when opening the UI from another device.
+---
 
-```bash
-export HOST_IP="$(./scripts/host-ip.sh)"   # e.g. 192.168.1.10
-```
+## Install on Ubuntu Linux (without Kubernetes)
 
-| Surface | URL |
-|---------|-----|
-| API + production UI | `http://<HOST-IP>:8000` |
-| Vite dev UI | `http://<HOST-IP>:5173` |
-| Prometheus (docker compose) | `http://<HOST-IP>:9090` |
-| Collector metrics | `http://<HOST-IP>:8889/metrics` |
+These steps target **Ubuntu 22.04 or 24.04 LTS** on a host that can reach your BIG-IP management IP (HTTPS, typically port **443**).
 
-Kubernetes port-forward must bind externally:
+### Prerequisites
+
+Install system packages, Docker, and Node.js (Node is only required to build the UI).
 
 ```bash
-kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/bigip-metrics-backend 8001:8000
-# UI at http://<HOST-IP>:8001
+sudo apt-get update
+sudo apt-get install -y git curl ca-certificates python3 python3-venv python3-pip
+
+# Docker Engine + Compose plugin (official convenience script)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"
+# Log out and back in so the docker group applies, then:
+docker compose version
+
+# Node.js 20.x (for building the React UI)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node --version
+npm --version
 ```
 
-The UI picks up Prometheus/collector links from the hostname you use in the browser (or set `ACCESS_HOST` on the backend).
+Confirm the host can reach BIG-IP (replace with your management IP):
 
-## Quick start
+```bash
+curl -sk --connect-timeout 5 https://<BIG-IP-MGMT-IP>/mgmt/shared/ident | head -c 200
+```
 
-### 1. Observability stack
+### Step 1 — Clone the repository
+
+```bash
+cd ~
+git clone https://github.com/gregcoward/BIG-IP-Metrics-Exporter.git
+cd BIG-IP-Metrics-Exporter
+chmod +x scripts/*.sh
+```
+
+### Step 2 — Start OpenTelemetry Collector and Prometheus
 
 ```bash
 ./scripts/init-collector-config.sh
 docker compose up -d
+docker compose ps
 ```
 
-- Collector OTLP: `4317` (gRPC), `4318` (HTTP)
-- Collector Prometheus exporter (validation): `http://<HOST-IP>:8889/metrics`
-- Prometheus UI: `http://<HOST-IP>:9090`
+Verify containers are running:
 
-### 2. Python API
+| Service | Port | Purpose |
+|---------|------|---------|
+| `otel-collector` | 4318 | OTLP HTTP (backend sends metrics here) |
+| `otel-collector` | 8889 | Prometheus exporter (`/metrics`) |
+| `prometheus` | 9090 | Prometheus UI |
 
 ```bash
+export HOST_IP="$(./scripts/host-ip.sh)"
+curl -s "http://${HOST_IP}:8889/metrics" | head -5
+curl -s "http://${HOST_IP}:9090/-/ready"
+```
+
+### Step 3 — Install and run the Python backend
+
+```bash
+cd ~/BIG-IP-Metrics-Exporter
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
+```
+
+Run the API (listens on **all interfaces**, port **8000**):
+
+```bash
+source .venv/bin/activate
 python run_server.py
 ```
 
-API listens on `http://<HOST-IP>:8000` (bound to `0.0.0.0`; same machine: `http://127.0.0.1:8000`)
-
-### 3. React UI (development)
+Leave this terminal open, or run in the background:
 
 ```bash
-cd frontend && npm install && npm run dev
+nohup .venv/bin/python run_server.py > /tmp/bigip-metrics-api.log 2>&1 &
+curl -s http://127.0.0.1:8000/api/health
 ```
 
-Open `http://<HOST-IP>:5173` (Vite listens on all interfaces; proxies `/api` to port 8000).
+### Step 4 — Build the web UI (production)
 
-### 4. Production UI (optional)
+In a **new terminal** on the same host:
 
 ```bash
-cd frontend && npm run build
+cd ~/BIG-IP-Metrics-Exporter/frontend
+npm ci
+npm run build
 ```
 
-Rebuild serves static files from `frontend/dist` via FastAPI.
+The backend serves the built UI from `frontend/dist`. Restart `run_server.py` if it was already running so it picks up the new files.
 
-## Workflow
+Open the application:
 
-1. **Connect** to BIG-IP management IP (uses `/mgmt/shared/authn/login` and token extension).
-2. **Select endpoints** from the catalog (stats endpoints recommended).
-3. **Configure exporters** in the UI → **Apply collector config** → `docker compose restart otel-collector`.
-4. **Start export** — backend polls BIG-IP and sends OTLP to `http://127.0.0.1:4318`.
-5. **Validate** in Prometheus (query metrics prefixed with `bigip_`, e.g. virtual server stats).
+```bash
+export HOST_IP="$(./scripts/host-ip.sh)"
+echo "UI: http://${HOST_IP}:8000"
+```
 
-## Collector exporters (UI)
+### Step 5 — Use the application
 
-| Type | Purpose |
-|------|---------|
-| `prometheus` | Expose metrics for Prometheus scrape (validation) |
-| `otlp_http` | Forward to remote OTLP/HTTP |
-| `otlp_grpc` | Forward to remote OTLP/gRPC |
-| `debug` | Log telemetry to collector stdout |
-| `file` | Write JSON metrics file in collector container |
+1. Open **`http://<HOST-IP>:8000`** in a browser.
+2. **BIG-IP connection** — enter management IP (e.g. `172.16.60.123`), username, password. Uncheck **Verify TLS** if using the default self-signed management certificate.
+3. **API endpoints** — select stats endpoints (defaults favor `/stats` paths).
+4. **OpenTelemetry Collector exporters** — configure exporters → **Apply collector config** → restart collector:
+   ```bash
+   docker compose restart otel-collector
+   ```
+5. **Export to collector** — leave OTLP endpoint as `http://127.0.0.1:4318` (backend on the same host as Docker) → **Start export**.
+6. **Prometheus validation** — open `http://<HOST-IP>:9090`, check **Status → Targets** (`otel-collector` up), query e.g. `bigip_` metrics.
 
-Generated config: `otel-collector/generated-config.yaml`
+### Optional — Development UI (Vite)
 
-## Kubernetes installation
+Use this if you are changing the React code (hot reload). Requires the backend from Step 3.
 
-Deploy the **full application** (backend + UI, OpenTelemetry Collector, Prometheus) with the manifests under [`k8s/`](k8s/) and [Kustomize](https://kustomize.io/).
+```bash
+cd ~/BIG-IP-Metrics-Exporter/frontend
+npm run dev
+```
+
+Open **`http://<HOST-IP>:5173`** (proxies `/api` to port 8000).
+
+### Optional — Firewall (UFW)
+
+If UFW is enabled, allow the ports you need:
+
+```bash
+sudo ufw allow 8000/tcp comment 'BIG-IP Metrics UI/API'
+sudo ufw allow 9090/tcp comment 'Prometheus'
+# Only if remote hosts must scrape collector metrics directly:
+sudo ufw allow 8889/tcp comment 'OTEL Prometheus exporter'
+```
+
+### Ubuntu troubleshooting
+
+| Symptom | What to check |
+|---------|----------------|
+| `Cannot reach BIG-IP` | Routing/firewall from Ubuntu host to management IP; `curl -sk https://<IP>/mgmt/shared/ident` |
+| `401 Authentication failed` | Username/password; account not locked; user has iControl REST permission |
+| `Login failed` / TLS errors | Try with **Verify TLS** unchecked, or install the BIG-IP management CA on Ubuntu |
+| `Token extension failed` | Warning only — connection can still work (~20 min token); fix token PATCH if needed |
+| No metrics in Prometheus | Export started in UI? `docker compose logs otel-collector`; OTLP URL `http://127.0.0.1:4318` |
+| UI blank after build | `frontend/dist` exists; restart `python run_server.py` |
+| `docker compose` not found | Install compose plugin: `sudo apt-get install docker-compose-plugin` |
+
+Stop the stack:
+
+```bash
+docker compose down
+# stop API: kill the run_server.py process or Ctrl+C
+```
+
+---
+
+## Install on Kubernetes
+
+Deploy the **full application** (backend + UI, OpenTelemetry Collector, Prometheus) with manifests under [`k8s/`](k8s/) and [Kustomize](https://kustomize.io/).
+
+Detailed guide: **[`docs/kubernetes.md`](docs/kubernetes.md)**
 
 ### Architecture in the cluster
 
@@ -159,77 +251,150 @@ flowchart TB
 | OTEL Collector | `otel/opentelemetry-collector-contrib:0.109.0` | `otel-collector:4317/4318/8889` |
 | Prometheus | `prom/prometheus:v2.54.1` | `prometheus:9090` |
 
-### Prerequisites
+### Kubernetes prerequisites
 
-- Kubernetes cluster (1.25+) and `kubectl`
-- **Backend image** built on your machine (and loaded into the cluster or pushed to a registry — it is **not** on Docker Hub)
-- **Network access** from pods to your BIG-IP management IP(s)
+- Kubernetes **1.25+** and `kubectl`
+- **Docker** on your workstation to build the backend image
+- Cluster nodes (or pod network) can reach BIG-IP management IP(s) on HTTPS
+- The backend image is **not** on Docker Hub — you must build and load/push it (see below)
 
-### Quick install (local cluster)
-
-For kind, minikube, k3d, or Docker Desktop Kubernetes:
+### Step 1 — Build the backend image
 
 ```bash
+git clone https://github.com/gregcoward/BIG-IP-Metrics-Exporter.git
+cd BIG-IP-Metrics-Exporter
 chmod +x scripts/k8s-*.sh
 ./scripts/k8s-build-image.sh
-./scripts/k8s-load-image.sh          # skip if load script warns; Docker Desktop may work without it
-./scripts/k8s-deploy.sh local        # imagePullPolicy: Never — uses your local image
 ```
 
-### Quick install (registry)
-
-When nodes pull from GHCR, ECR, ACR, etc.:
+**Local cluster** (kind / minikube / k3d):
 
 ```bash
-./scripts/k8s-build-image.sh
+./scripts/k8s-load-image.sh
+```
+
+**Remote cluster** (registry):
+
+```bash
 export IMAGE=ghcr.io/<you>/bigip-metrics-exporter:1.0.0
 docker tag bigip-metrics-exporter:latest "${IMAGE}"
 docker push "${IMAGE}"
-IMAGE="${IMAGE}" ./scripts/k8s-deploy.sh minimal
-
-# 3. Open the UI (reachable on your LAN IP)
-export HOST_IP="$(./scripts/host-ip.sh)"
-kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/bigip-metrics-backend 8001:8000
-# http://<HOST-IP>:8001
-
-# 4. After configuring exporters in the UI, sync collector config:
-kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/bigip-metrics-backend 8001:8000 &
-./scripts/k8s-apply-collector-config.sh
 ```
 
-Prometheus (validation):
+### Step 2 — Deploy the stack
+
+**Local image** (no registry):
 
 ```bash
-kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/prometheus 9090:9090
-# http://<HOST-IP>:9090
+./scripts/k8s-deploy.sh local
 ```
+
+**Registry image**:
+
+```bash
+IMAGE="${IMAGE}" ./scripts/k8s-deploy.sh minimal
+```
+
+Wait for pods:
+
+```bash
+kubectl -n bigip-metrics get pods
+```
+
+### Step 3 — Open the UI and Prometheus
+
+Bind port-forwards on all interfaces so other machines can use your host IP:
+
+```bash
+export HOST_IP="$(./scripts/host-ip.sh)"
+
+kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/bigip-metrics-backend 8001:8000
+# UI: http://<HOST-IP>:8001
+
+# In another terminal:
+kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/prometheus 9090:9090
+# Prometheus: http://<HOST-IP>:9090
+```
+
+### Step 4 — Use the application on Kubernetes
+
+1. Open **`http://<HOST-IP>:8001`**.
+2. Connect to BIG-IP (credentials are held in the API session, not in Kubernetes Secrets by default).
+3. Select APIs and **Apply collector config** in the UI.
+4. Sync collector config into the cluster (with backend port-forward active):
+
+   ```bash
+   ./scripts/k8s-apply-collector-config.sh
+   ```
+
+5. **Start export** — backend uses in-cluster OTLP: `http://otel-collector.bigip-metrics.svc.cluster.local:4318`.
+6. Validate in Prometheus at **`http://<HOST-IP>:9090`**.
 
 ### Manifests and overlays
 
 | Path | Description |
 |------|-------------|
 | [`k8s/base/`](k8s/base/) | Namespace, ConfigMaps, Deployments, Services, sample Ingress |
-| [`k8s/overlays/local/`](k8s/overlays/local/) | **Local image** (`imagePullPolicy: Never`) — use after `k8s-build-image.sh` + `k8s-load-image.sh` |
-| [`k8s/overlays/minimal/`](k8s/overlays/minimal/) | No Ingress; requires `IMAGE=<registry>/...` when deploying |
+| [`k8s/overlays/local/`](k8s/overlays/local/) | Local image (`imagePullPolicy: Never`) |
+| [`k8s/overlays/minimal/`](k8s/overlays/minimal/) | No Ingress; requires `IMAGE=<registry>/...` |
 | [`k8s/overlays/example/`](k8s/overlays/example/) | Example registry + Ingress hostnames |
 
-Do not apply `minimal` without pushing an image first — `bigip-metrics-exporter:latest` is not published to `docker.io`.
+Do not deploy `minimal` without pushing an image — `bigip-metrics-exporter:latest` is not published to `docker.io`.
 
-### Post-install workflow
+### Kubernetes troubleshooting
 
-1. **Connect** to BIG-IP in the UI (credentials stay in the API session; not stored in cluster Secrets by default).
-2. **Select APIs** and **apply collector exporter** settings in the UI.
-3. Run [`scripts/k8s-apply-collector-config.sh`](scripts/k8s-apply-collector-config.sh) to update the `otel-collector-config` ConfigMap and restart the collector.
-4. **Start export** — the backend sends OTLP to `http://otel-collector.bigip-metrics.svc.cluster.local:4318` (configured via `OTLP_HTTP_ENDPOINT`).
-5. **Validate** in Prometheus (targets → `otel-collector`, query metrics with prefix `bigip_`).
+| Symptom | What to check |
+|---------|----------------|
+| `ErrImagePull` / `authorization failed` | Image not on Docker Hub — use [`local` overlay](#step-2--deploy-the-stack) or push to your registry |
+| `401` / connect errors in UI | Pod network → BIG-IP management IP; TLS verify setting |
+| No metrics in Prometheus | Export started? `kubectl logs -n bigip-metrics deploy/otel-collector` |
+| Port-forward only on localhost | Add `--address 0.0.0.0` (see Step 3) |
 
-### Customization
+Uninstall:
 
-- **Image**: set `images` in your overlay `kustomization.yaml`.
-- **Ingress**: use `k8s/base` or `example` overlay; set `spec.rules[].host` and `ingressClassName`.
-- **Env vars** on the backend Deployment: `OTLP_HTTP_ENDPOINT`, `ACCESS_HOST`, `PROMETHEUS_BROWSER_PORT` (see [`docs/kubernetes.md`](docs/kubernetes.md)).
+```bash
+kubectl delete -k k8s/overlays/local
+```
 
-Full troubleshooting, RBAC, upgrades, and BIG-IP connectivity notes: **[`docs/kubernetes.md`](docs/kubernetes.md)**.
+---
+
+## Access from other machines
+
+Services listen on **`0.0.0.0`**. Use the Ubuntu host’s LAN IP instead of `127.0.0.1` when opening the UI from another workstation.
+
+```bash
+export HOST_IP="$(./scripts/host-ip.sh)"   # e.g. 192.168.1.10
+```
+
+| Surface | Ubuntu (default) | Kubernetes (port-forward) |
+|---------|------------------|---------------------------|
+| UI + API | `http://<HOST-IP>:8000` | `http://<HOST-IP>:8001` |
+| Vite dev UI | `http://<HOST-IP>:5173` | — |
+| Prometheus | `http://<HOST-IP>:9090` | `http://<HOST-IP>:9090` |
+| Collector `/metrics` | `http://<HOST-IP>:8889/metrics` | (in-cluster scrape) |
+
+The UI builds Prometheus/collector links from the browser hostname you use (or set `ACCESS_HOST` on the backend in Kubernetes).
+
+## API catalog
+
+Endpoints are defined in [`data/bigip_apis.csv`](data/bigip_apis.csv) (84 iControl REST paths; 33 stats/metrics-oriented by default).
+
+## Collector exporters (UI)
+
+| Type | Purpose |
+|------|---------|
+| `prometheus` | Expose metrics for Prometheus scrape (validation) |
+| `otlp_http` | Forward to remote OTLP/HTTP |
+| `otlp_grpc` | Forward to remote OTLP/gRPC |
+| `debug` | Log telemetry to collector stdout |
+| `file` | Write JSON metrics file in collector container |
+
+After **Apply collector config**, restart the collector:
+
+- **Ubuntu:** `docker compose restart otel-collector`
+- **Kubernetes:** `./scripts/k8s-apply-collector-config.sh`
+
+Generated config file: `otel-collector/generated-config.yaml`
 
 ## Repository
 
