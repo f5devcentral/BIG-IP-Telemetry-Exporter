@@ -243,9 +243,14 @@ export default function App() {
     });
   }, [apis, metricsOnly, moduleFilter]);
 
+  const canConnect = useMemo(
+    () => Boolean(host.trim() && username.trim() && password),
+    [host, username, password],
+  );
+
   const connect = useCallback(async () => {
-    if (!host.trim()) {
-      setError("Management host is required");
+    if (!canConnect) {
+      setError("Management host, username, and password are required");
       return;
     }
     setBusy(true);
@@ -274,7 +279,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [host, deviceLabel, username, password, verifyTls, refreshDevices]);
+  }, [canConnect, host, deviceLabel, username, password, verifyTls, refreshDevices]);
 
   const disconnectDevice = useCallback(
     async (sessionId: string) => {
@@ -740,7 +745,17 @@ export default function App() {
           Verify TLS certificate
         </label>
         <div className="actions">
-          <button type="button" className="btn btn-primary" onClick={() => void connect()}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!canConnect || busy}
+            onClick={() => void connect()}
+            title={
+              canConnect
+                ? undefined
+                : "Enter management host, username, and password to connect"
+            }
+          >
             {devices.length > 0 ? "Add BIG-IP" : "Connect"}
           </button>
           <span className={devices.length > 0 ? "status-ready" : "muted"}>
