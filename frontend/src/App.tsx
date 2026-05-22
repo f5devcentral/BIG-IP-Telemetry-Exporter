@@ -149,6 +149,8 @@ export default function App() {
     reload_url?: string;
     restart_mode?: string;
     restart_available?: boolean;
+    wipe_tsdb_on_reload?: boolean;
+    wipe_tsdb_available?: boolean;
     restart_hint?: string;
     reload_hint?: string;
     restart_hint_detail?: string;
@@ -909,9 +911,9 @@ export default function App() {
             type="button"
             className="btn btn-secondary"
             onClick={() => void reloadPrometheus()}
-            title="POST /-/reload — refresh scrape config and targets"
+            title="Wipe TSDB, restart Prometheus, reload scrape config"
           >
-            Reload Prometheus
+            Reload Prometheus (wipe data)
           </button>
           <button
             type="button"

@@ -133,8 +133,8 @@ Empty `session_ids` exports **all** connected devices. To target specific device
    bigip_tm_ltm_virtual_stats{bigip_host="10.0.0.50"}
    ```
 
-4. Use **Reload Prometheus** in the UI after config changes.
-5. Use **Restart Prometheus** if reload is insufficient.
+4. Use **Reload Prometheus (wipe data)** in the UI to clear historical metrics and reload scrape config (recreates the Docker container or Kubernetes pod, then calls `/-/reload`).
+5. Use **Restart Prometheus** for a recycle without the explicit reload step.
 
 ## Multi-BIG-IP reference
 

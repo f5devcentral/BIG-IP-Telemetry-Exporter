@@ -168,8 +168,8 @@ REST equivalent: `POST /api/export/start` with body `{ "session_ids": ["..."], "
 
    (Exact label names depend on the collector Prometheus exporter; search `bigip_` in the UI or use **Graph** autocomplete.)
 
-3. **Reload Prometheus** — refresh scrape config (`--web.enable-lifecycle` is enabled in `docker-compose.yml`).
-4. **Restart Prometheus** — full container/pod recycle when reload is not enough.
+3. **Reload Prometheus (wipe data)** — recreates Prometheus storage (clears TSDB), then reloads scrape config (`--web.enable-lifecycle` is enabled in `docker-compose.yml`).
+4. **Restart Prometheus** — same container/pod recycle without a separate config reload step.
 
 On Ubuntu, restart uses `docker compose restart prometheus`. On Kubernetes, the API runs `kubectl rollout restart deployment/prometheus` in namespace `bigip-metrics`.
 
