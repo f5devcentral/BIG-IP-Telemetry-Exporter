@@ -175,7 +175,7 @@ echo "UI: http://${HOST_IP}:8001"
 ### Step 5 — Use the application
 
 1. Open **`http://<HOST-IP>:8001`** in a browser.
-2. **BIG-IP connection** — enter management IP (e.g. `172.16.60.123`), username, password. Uncheck **Verify TLS** if using the default self-signed management certificate.
+2. **BIG-IP connections** — connect one or more management IPs (e.g. `172.16.60.123`). Use **Add BIG-IP** for additional devices; optional **Label** distinguishes them in the UI. Uncheck **Verify TLS** if using the default self-signed management certificate. Check which devices to include before **Start export**.
 3. **API endpoints** — select stats endpoints (defaults favor `/stats` paths).
 4. **OpenTelemetry Collector exporters** — configure exporters → **Apply collector config** → restart collector:
    ```bash
@@ -325,7 +325,7 @@ kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/prometheus 9090:9090
 ### Step 4 — Use the application on Kubernetes
 
 1. Open **`http://<HOST-IP>:8001`**.
-2. Connect to BIG-IP (credentials are held in the API session, not in Kubernetes Secrets by default).
+2. Connect to one or more BIG-IPs (**Add BIG-IP** for each device; credentials are held in API sessions, not in Kubernetes Secrets by default).
 3. Select APIs and **Apply collector config** in the UI.
 4. Sync collector config into the cluster (with backend port-forward active):
 

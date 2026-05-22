@@ -391,3 +391,50 @@ a:hover {
     transform: rotate(360deg);
   }
 }
+
+.subsection-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.75rem;
+  color: var(--text-heading);
+}
+
+.device-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.device-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--pre-bg);
+}
+
+.device-list-check {
+  flex: 1 1 12rem;
+  margin: 0;
+}
+
+.device-list-host {
+  font-weight: 400;
+}
+
+.device-list-warn {
+  flex: 1 1 100%;
+  font-size: 0.85rem;
+  color: var(--status-not);
+}
+
+.btn-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+}

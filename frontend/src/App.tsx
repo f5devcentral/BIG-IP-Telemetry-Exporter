@@ -22,6 +22,16 @@ type ExporterConfig = {
   params: Record<string, string | number | boolean>;
 };
 
+type BigIPDevice = {
+  session_id: string;
+  host: string;
+  display_host: string;
+  label: string;
+  token_timeout_sec?: number;
+  warning?: string | null;
+  connected_since?: number;
+};
+
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(path, init);
@@ -74,10 +84,12 @@ export default function App() {
   const [connectWarning, setConnectWarning] = useState<string | null>(null);
 
   const [host, setHost] = useState("");
+  const [deviceLabel, setDeviceLabel] = useState("");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [verifyTls, setVerifyTls] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [devices, setDevices] = useState<BigIPDevice[]>([]);
+  const [exportDeviceIds, setExportDeviceIds] = useState<Set<string>>(new Set());
 
   const [apis, setApis] = useState<ApiRow[]>([]);
   const [modules, setModules] = useState<string[]>([]);
@@ -110,6 +122,21 @@ export default function App() {
     localStorage.setItem(THEME_STORAGE_KEY, themeMode);
   }, [themeMode]);
 
+  const refreshDevices = useCallback(async () => {
+    const r = await apiFetch("/api/bigips");
+    const data = await readJson<{ devices: BigIPDevice[] }>(r);
+    setDevices(data.devices);
+    setExportDeviceIds((prev) => {
+      const ids = new Set(data.devices.map((d) => d.session_id));
+      if (prev.size === 0) return ids;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (ids.has(id)) next.add(id);
+      }
+      return next.size > 0 ? next : ids;
+    });
+  }, []);
+
   useEffect(() => {
     void (async () => {
       try {
@@ -135,11 +162,12 @@ export default function App() {
           .filter((a) => a.collect_metrics === "true")
           .map((a) => a.endpoint);
         setSelectedEndpoints(new Set(defaults));
+        await refreshDevices();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
-  }, []);
+  }, [refreshDevices]);
 
   const filteredApis = useMemo(() => {
     return apis.filter((a) => {
@@ -150,6 +178,10 @@ export default function App() {
   }, [apis, metricsOnly, moduleFilter]);
 
   const connect = useCallback(async () => {
+    if (!host.trim()) {
+      setError("Management host is required");
+      return;
+    }
     setBusy(true);
     setError(null);
     setConnectWarning(null);
@@ -162,17 +194,53 @@ export default function App() {
           username,
           password,
           verify_tls: verifyTls,
+          label: deviceLabel.trim(),
         }),
       });
       const data = await readJson<{ session_id: string; warning?: string }>(r);
-      setSessionId(data.session_id);
       setConnectWarning(data.warning ?? null);
+      setPassword("");
+      setDeviceLabel("");
+      await refreshDevices();
+      setExportDeviceIds((prev) => new Set(prev).add(data.session_id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [host, username, password, verifyTls]);
+  }, [host, deviceLabel, username, password, verifyTls, refreshDevices]);
+
+  const disconnectDevice = useCallback(
+    async (sessionId: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await apiFetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+          method: "DELETE",
+        });
+        await refreshDevices();
+        setExportDeviceIds((prev) => {
+          const next = new Set(prev);
+          next.delete(sessionId);
+          return next;
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshDevices],
+  );
+
+  const toggleExportDevice = (sessionId: string) => {
+    setExportDeviceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
 
   const applyCollector = useCallback(async () => {
     setBusy(true);
@@ -200,18 +268,24 @@ export default function App() {
   }, []);
 
   const startExport = useCallback(async () => {
-    if (!sessionId) {
-      setError("Connect to BIG-IP first");
+    if (devices.length === 0) {
+      setError("Connect to at least one BIG-IP first");
       return;
     }
+    if (exportDeviceIds.size === 0) {
+      setError("Select at least one BIG-IP device for export");
+      return;
+    }
+    const sessionIds = Array.from(exportDeviceIds);
     setBusy(true);
     setError(null);
     try {
       const endpoints = Array.from(selectedEndpoints);
-      const r = await apiFetch(`/api/export/start?session_id=${encodeURIComponent(sessionId)}`, {
+      const r = await apiFetch("/api/export/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          session_ids: sessionIds,
           endpoints,
           metrics_only: metricsOnly,
           modules: moduleFilter ? [moduleFilter] : [],
@@ -226,7 +300,15 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [sessionId, selectedEndpoints, metricsOnly, moduleFilter, pollInterval, otlpEndpoint]);
+  }, [
+    devices,
+    exportDeviceIds,
+    selectedEndpoints,
+    metricsOnly,
+    moduleFilter,
+    pollInterval,
+    otlpEndpoint,
+  ]);
 
   const stopExport = useCallback(async () => {
     setBusy(true);
@@ -340,11 +422,54 @@ export default function App() {
       )}
 
       <section className="card">
-        <h2>BIG-IP connection</h2>
+        <h2>BIG-IP connections</h2>
+        <p className="muted">
+          Connect one or more management addresses. Metrics are tagged per device (
+          <code>bigip.host</code>). Reconnecting the same host replaces the previous session.
+        </p>
+        {devices.length > 0 && (
+          <ul className="device-list">
+            {devices.map((d) => (
+              <li key={d.session_id} className="device-list-item">
+                <label className="check device-list-check">
+                  <input
+                    type="checkbox"
+                    checked={exportDeviceIds.has(d.session_id)}
+                    onChange={() => toggleExportDevice(d.session_id)}
+                    title="Include in export"
+                  />
+                  <span>
+                    <strong>{d.label || d.display_host}</strong>
+                    <span className="muted device-list-host"> — {d.display_host}</span>
+                  </span>
+                </label>
+                {d.warning && <span className="device-list-warn">{d.warning}</span>}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void disconnectDevice(d.session_id)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <h3 className="subsection-title">
+          {devices.length > 0 ? "Add another BIG-IP" : "Connect BIG-IP"}
+        </h3>
         <div className="row">
           <div className="field">
             <label>Management host</label>
             <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="10.0.0.1" />
+          </div>
+          <div className="field">
+            <label>Label (optional)</label>
+            <input
+              value={deviceLabel}
+              onChange={(e) => setDeviceLabel(e.target.value)}
+              placeholder="e.g. prod-dc1"
+            />
           </div>
           <div className="field">
             <label>Username</label>
@@ -369,10 +494,12 @@ export default function App() {
         </label>
         <div className="actions">
           <button type="button" className="btn btn-primary" onClick={() => void connect()}>
-            Connect
+            {devices.length > 0 ? "Add BIG-IP" : "Connect"}
           </button>
-          {sessionId && (
-            <span className="status-ready">Session active</span>
+          {devices.length > 0 && (
+            <span className="status-ready">
+              {devices.length} device{devices.length === 1 ? "" : "s"} connected
+            </span>
           )}
         </div>
       </section>
@@ -543,6 +670,9 @@ export default function App() {
 
       <section className="card">
         <h2>Export to collector (OTLP)</h2>
+        <p className="muted">
+          Polls the checked BIG-IP devices in the connections list above.
+        </p>
         <div className="row">
           <div className="field">
             <label>OTLP HTTP endpoint (Python → collector)</label>

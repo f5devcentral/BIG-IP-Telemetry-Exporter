@@ -24,6 +24,7 @@ def _walk_nested_stats(
     *,
     object_path: list[str],
     endpoint: str,
+    bigip_host: str,
 ) -> Iterator[tuple[str, float, dict[str, str]]]:
     if isinstance(obj, dict):
         if "nestedStats" in obj:
@@ -34,6 +35,7 @@ def _walk_nested_stats(
                         val,
                         object_path=object_path + [_sanitize_name(str(key))],
                         endpoint=endpoint,
+                        bigip_host=bigip_host,
                     )
             return
         if "entries" in obj and isinstance(obj["entries"], dict):
@@ -42,6 +44,7 @@ def _walk_nested_stats(
                     val,
                     object_path=object_path + [_sanitize_name(str(key))],
                     endpoint=endpoint,
+                    bigip_host=bigip_host,
                 )
             return
         for key, val in obj.items():
@@ -53,6 +56,8 @@ def _walk_nested_stats(
                 attrs = {
                     "bigip.endpoint": endpoint,
                     "bigip.object": ".".join(object_path) if object_path else "root",
+                    "bigip.host": bigip_host,
+                    "bigip.management_ip": bigip_host,
                 }
                 yield metric_name, float(val), attrs
             elif isinstance(val, dict):
@@ -60,12 +65,23 @@ def _walk_nested_stats(
                     val,
                     object_path=object_path + [_sanitize_name(str(key))],
                     endpoint=endpoint,
+                    bigip_host=bigip_host,
                 )
 
 
-def extract_metrics(endpoint: str, payload: Any) -> list[dict[str, Any]]:
+def extract_metrics(
+    endpoint: str,
+    payload: Any,
+    *,
+    bigip_host: str = "unknown",
+) -> list[dict[str, Any]]:
     """Return list of {name, value, attributes} dicts."""
     points: list[dict[str, Any]] = []
-    for name, value, attrs in _walk_nested_stats(payload, object_path=[], endpoint=endpoint):
+    for name, value, attrs in _walk_nested_stats(
+        payload,
+        object_path=[],
+        endpoint=endpoint,
+        bigip_host=bigip_host,
+    ):
         points.append({"name": name, "value": value, "attributes": attrs})
     return points

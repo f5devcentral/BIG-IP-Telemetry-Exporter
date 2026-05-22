@@ -66,7 +66,11 @@ def _browser_urls(request: Request) -> dict[str, str]:
 @dataclass
 class _Session:
     client: BigIPClient
+    host: str
+    label: str
     created: float
+    token_timeout_sec: int = 1200
+    warning: str | None = None
 
 
 _sessions: dict[str, _Session] = {}
@@ -88,12 +92,43 @@ def _gc_sessions() -> None:
             _sessions.pop(sid, None)
 
 
+def _normalize_host(host: str) -> str:
+    h = host.strip().rstrip("/")
+    if not h.startswith("http://") and not h.startswith("https://"):
+        h = f"https://{h}"
+    return h
+
+
+def _display_host(host: str) -> str:
+    return host.replace("https://", "").replace("http://", "").split("/")[0]
+
+
+def _find_session_id_for_host(host: str) -> str | None:
+    target = _normalize_host(host)
+    for sid, sess in _sessions.items():
+        if _normalize_host(sess.host) == target:
+            return sid
+    return None
+
+
 def _get_session(session_id: str) -> _Session:
     _gc_sessions()
     s = _sessions.get(session_id)
     if not s:
         raise HTTPException(status_code=404, detail="Unknown or expired session")
     return s
+
+
+def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "host": sess.host,
+        "display_host": _display_host(sess.host),
+        "label": sess.label,
+        "token_timeout_sec": sess.token_timeout_sec,
+        "warning": sess.warning,
+        "connected_since": sess.created,
+    }
 
 
 def _load_apis() -> list[dict[str, str]]:
@@ -108,6 +143,7 @@ class ConnectBody(BaseModel):
     username: str
     password: str
     verify_tls: bool = False
+    label: str = ""
 
 
 class ConnectResponse(BaseModel):
@@ -132,6 +168,10 @@ class CollectorConfigBody(BaseModel):
 
 
 class ExportStartBody(BaseModel):
+    session_ids: list[str] = Field(
+        default_factory=list,
+        description="BIG-IP session IDs to poll; empty = all connected devices",
+    )
     endpoints: list[str] = Field(default_factory=list)
     metrics_only: bool = True
     modules: list[str] = Field(default_factory=list)
@@ -144,6 +184,7 @@ class ExportStartBody(BaseModel):
 
 class ProbeBody(BaseModel):
     endpoint: str
+    session_id: str = ""
 
 
 app = FastAPI(title="BIG-IP Metrics Exporter", version="1.0.0")
@@ -205,9 +246,29 @@ def list_apis(
     return {"apis": rows, "count": len(rows), "modules": modules}
 
 
+@app.get("/api/bigips")
+def list_bigips() -> dict[str, Any]:
+    _gc_sessions()
+    devices = [_session_to_dict(sid, s) for sid, s in _sessions.items()]
+    return {"devices": devices, "count": len(devices)}
+
+
+@app.get("/api/devices")
+def list_devices() -> dict[str, Any]:
+    return list_bigips()
+
+
 @app.post("/api/connect", response_model=ConnectResponse)
 def connect(body: ConnectBody) -> ConnectResponse:
     try:
+        existing = _find_session_id_for_host(body.host)
+        if existing:
+            old = _sessions.pop(existing)
+            try:
+                old.client.logout()
+            except Exception:
+                pass
+
         client = BigIPClient(
             body.host,
             body.username,
@@ -230,11 +291,20 @@ def connect(body: ConnectBody) -> ConnectResponse:
                 "Long export runs may need to reconnect if the session expires."
             )
 
+        host_norm = _normalize_host(body.host)
+        label = (body.label or "").strip() or _display_host(host_norm)
         sid = secrets.token_urlsafe(24)
-        _sessions[sid] = _Session(client=client, created=time.time())
+        _sessions[sid] = _Session(
+            client=client,
+            host=host_norm,
+            label=label,
+            created=time.time(),
+            token_timeout_sec=token_timeout_sec,
+            warning=warning,
+        )
         return ConnectResponse(
             session_id=sid,
-            host=body.host,
+            host=host_norm,
             token_timeout_sec=token_timeout_sec,
             warning=warning,
         )
@@ -260,13 +330,22 @@ def disconnect(session_id: str) -> dict[str, bool]:
 
 
 @app.post("/api/probe")
-def probe_endpoint(body: ProbeBody, session_id: str = Query(...)) -> dict[str, Any]:
-    s = _get_session(session_id)
+def probe_endpoint(
+    body: ProbeBody,
+    session_id: str = Query(""),
+) -> dict[str, Any]:
+    sid = body.session_id or session_id
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    s = _get_session(sid)
     try:
         payload = s.client.get(body.endpoint)
-        points = extract_metrics(body.endpoint, payload)
+        points = extract_metrics(
+            body.endpoint, payload, bigip_host=_display_host(s.host)
+        )
         return {
             "endpoint": body.endpoint,
+            "host": s.host,
             "ok": True,
             "metric_points": len(points),
             "sample": points[:5],
@@ -316,16 +395,35 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
 @app.get("/api/export/status")
 def export_status() -> dict[str, Any]:
     global _export_loop, _pusher
+    _gc_sessions()
     return {
         "loop": _export_loop.status if _export_loop else {"running": False},
         "otlp_endpoint": getattr(_pusher, "_endpoint", None) if _pusher else None,
+        "connected_devices": [
+            _session_to_dict(sid, s) for sid, s in _sessions.items()
+        ],
     }
 
 
+def _resolve_export_clients(session_ids: list[str]) -> list[tuple[str, str, BigIPClient]]:
+    _gc_sessions()
+    ids = session_ids or list(_sessions.keys())
+    if not ids:
+        raise HTTPException(
+            status_code=400,
+            detail="No BIG-IP devices connected. Add at least one device before starting export.",
+        )
+    clients: list[tuple[str, str, BigIPClient]] = []
+    for sid in ids:
+        sess = _get_session(sid)
+        clients.append((_display_host(sess.host), sid, sess.client))
+    return clients
+
+
 @app.post("/api/export/start")
-def export_start(body: ExportStartBody, session_id: str = Query(...)) -> dict[str, Any]:
+def export_start(body: ExportStartBody) -> dict[str, Any]:
     global _export_loop, _pusher
-    s = _get_session(session_id)
+    clients = _resolve_export_clients(body.session_ids)
     endpoints = body.endpoints
     if not endpoints:
         rows = _load_apis()
@@ -346,7 +444,7 @@ def export_start(body: ExportStartBody, session_id: str = Query(...)) -> dict[st
     otlp = body.otlp_endpoint.rstrip("/")
     _pusher = OTLPMetricsPusher(otlp)
     _export_loop = MetricsExportLoop(
-        s.client,
+        clients,
         endpoints,
         _pusher,
         poll_interval_sec=body.poll_interval_sec,
@@ -356,6 +454,8 @@ def export_start(body: ExportStartBody, session_id: str = Query(...)) -> dict[st
     return {
         "started": True,
         "endpoints": len(endpoints),
+        "bigip_count": len(clients),
+        "bigip_hosts": [h for h, _, _ in clients],
         "first_run": result,
         "status": _export_loop.status,
     }
