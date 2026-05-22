@@ -31,6 +31,7 @@ from backend.collector_config import (
 )
 from backend.metrics_extractor import extract_metrics
 from backend.otel_export import MetricsExportLoop, OTLPMetricsPusher
+from backend.prometheus_ops import control_status, reload_prometheus, restart_prometheus
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APIS_CSV = REPO_ROOT / "data" / "bigip_apis.csv"
@@ -381,6 +382,27 @@ def prometheus_hints(request: Request) -> dict[str, str]:
         "query_example": "bigip_tm_ltm_virtual_stats",
         "scrape_job": "otel-collector",
     }
+
+
+@app.get("/api/prometheus/control")
+def prometheus_control(request: Request) -> dict[str, Any]:
+    return control_status(request_host=_browser_host(request))
+
+
+@app.post("/api/prometheus/reload")
+def prometheus_reload(request: Request) -> dict[str, Any]:
+    try:
+        return reload_prometheus(request_host=_browser_host(request))
+    except BigIPError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/prometheus/restart")
+def prometheus_restart() -> dict[str, Any]:
+    try:
+        return restart_prometheus()
+    except BigIPError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _yaml_dump(cfg: dict[str, Any]) -> str:

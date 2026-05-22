@@ -93,6 +93,16 @@ export default function App() {
   const [otlpEndpoint, setOtlpEndpoint] = useState("http://127.0.0.1:4318");
   const [exportStatus, setExportStatus] = useState<Record<string, unknown> | null>(null);
   const [promHints, setPromHints] = useState<Record<string, string>>({});
+  type PromControl = {
+    reload_url?: string;
+    restart_mode?: string;
+    restart_available?: boolean;
+    restart_hint?: string;
+    reload_hint?: string;
+    restart_hint_detail?: string;
+  };
+  const [promControl, setPromControl] = useState<PromControl | null>(null);
+  const [promActionStatus, setPromActionStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const resolved = resolveTheme(themeMode);
@@ -103,20 +113,23 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const [apiRes, catRes, promRes, runtimeRes] = await Promise.all([
+        const [apiRes, catRes, promRes, runtimeRes, promCtrlRes] = await Promise.all([
           apiFetch("/api/apis?metrics_only=false"),
           apiFetch("/api/exporters/catalog"),
           apiFetch("/api/validation/prometheus"),
           apiFetch("/api/runtime-config"),
+          apiFetch("/api/prometheus/control"),
         ]);
         const apiData = await readJson<{ apis: ApiRow[]; modules: string[] }>(apiRes);
         const catData = await readJson<{ exporters: ExporterCatalogItem[] }>(catRes);
         const promData = await readJson<Record<string, string>>(promRes);
+        const promCtrl = await readJson<PromControl>(promCtrlRes);
         const runtime = await readJson<{ otlp_endpoint?: string }>(runtimeRes);
         setApis(apiData.apis);
         setModules(apiData.modules);
         setCatalog(catData.exporters);
         setPromHints(promData);
+        setPromControl(promCtrl);
         if (runtime.otlp_endpoint) setOtlpEndpoint(runtime.otlp_endpoint);
         const defaults = apiData.apis
           .filter((a) => a.collect_metrics === "true")
@@ -231,6 +244,34 @@ export default function App() {
     const r = await apiFetch("/api/export/status");
     const data = await readJson<{ loop: Record<string, unknown> }>(r);
     setExportStatus(data.loop);
+  }, []);
+
+  const reloadPrometheus = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await apiFetch("/api/prometheus/reload", { method: "POST" });
+      const data = await readJson<{ message?: string }>(r);
+      setPromActionStatus(data.message ?? "Prometheus reloaded.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const restartPrometheus = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await apiFetch("/api/prometheus/restart", { method: "POST" });
+      const data = await readJson<{ message?: string }>(r);
+      setPromActionStatus(data.message ?? "Prometheus restarted.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }, []);
 
   const toggleEndpoint = (ep: string) => {
@@ -558,6 +599,37 @@ export default function App() {
         <p className="muted">
           Example query: <code>{promHints.query_example ?? "bigip_"}</code>
         </p>
+        <p className="muted">
+          {promControl?.reload_hint ??
+            "Reload picks up config/target changes. Restart recycles the Prometheus process."}
+        </p>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void reloadPrometheus()}
+            title="POST /-/reload — refresh scrape config and targets"
+          >
+            Reload Prometheus
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void restartPrometheus()}
+            title={promControl?.restart_hint ?? "Restart Prometheus container/pod"}
+          >
+            Restart Prometheus
+          </button>
+        </div>
+        {promControl && !promControl.restart_available && promControl.restart_hint && (
+          <p className="muted">
+            Full restart from the API is unavailable here. Use <strong>Reload</strong>, or run:{" "}
+            <code>{promControl.restart_hint}</code>
+          </p>
+        )}
+        {promActionStatus && (
+          <p className="status-ready">{promActionStatus}</p>
+        )}
       </section>
     </div>
   );

@@ -182,7 +182,7 @@ echo "UI: http://${HOST_IP}:8001"
    docker compose restart otel-collector
    ```
 5. **Export to collector** — leave OTLP endpoint as `http://127.0.0.1:4318` (backend on the same host as Docker) → **Start export**.
-6. **Prometheus validation** — open `http://<HOST-IP>:9090`, check **Status → Targets** (`otel-collector` up), query e.g. `bigip_` metrics.
+6. **Prometheus validation** — open `http://<HOST-IP>:9090`, check **Status → Targets** (`otel-collector` up), query e.g. `bigip_` metrics. Use **Reload Prometheus** (refresh targets) or **Restart Prometheus** (docker compose recycle) in the UI.
 
 ### Optional — Development UI (Vite)
 
