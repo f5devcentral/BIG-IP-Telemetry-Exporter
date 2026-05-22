@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import secrets
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 from backend.bigip_client import BigIPClient, BigIPError
 from backend.collector_config import (
@@ -144,12 +149,15 @@ app = FastAPI(title="BIG-IP Metrics Exporter", version="1.0.0")
 
 
 @app.exception_handler(Exception)
-async def api_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Return JSON errors for API routes instead of a bare 500 page."""
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Unexpected errors only — do not swallow HTTPException (would turn 400 into 500)."""
+    if isinstance(exc, (HTTPException, StarletteHTTPException)):
+        raise exc
+    logger.exception("Unhandled error on %s", request.url.path)
     if request.url.path.startswith("/api"):
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Internal error: {exc}"},
+            content={"detail": str(exc), "type": type(exc).__name__},
         )
     raise exc
 
@@ -198,36 +206,45 @@ def list_apis(
 
 @app.post("/api/connect", response_model=ConnectResponse)
 def connect(body: ConnectBody) -> ConnectResponse:
-    client = BigIPClient(
-        body.host,
-        body.username,
-        body.password,
-        verify_tls=body.verify_tls,
-    )
     try:
-        client.login()
-    except BigIPError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    warning: str | None = None
-    token_timeout_sec = 1200
-    try:
-        client.extend_token()
-        token_timeout_sec = 3600
-    except BigIPError as exc:
-        warning = (
-            f"Connected, but could not extend auth token ({exc}). "
-            "Long export runs may need to reconnect if the session expires."
+        client = BigIPClient(
+            body.host,
+            body.username,
+            body.password,
+            verify_tls=body.verify_tls,
         )
+        try:
+            client.login()
+        except BigIPError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    sid = secrets.token_urlsafe(24)
-    _sessions[sid] = _Session(client=client, created=time.time())
-    return ConnectResponse(
-        session_id=sid,
-        host=body.host,
-        token_timeout_sec=token_timeout_sec,
-        warning=warning,
-    )
+        warning: str | None = None
+        token_timeout_sec = 1200
+        try:
+            client.extend_token()
+            token_timeout_sec = 3600
+        except BigIPError as exc:
+            warning = (
+                f"Connected, but could not extend auth token ({exc}). "
+                "Long export runs may need to reconnect if the session expires."
+            )
+
+        sid = secrets.token_urlsafe(24)
+        _sessions[sid] = _Session(client=client, created=time.time())
+        return ConnectResponse(
+            session_id=sid,
+            host=body.host,
+            token_timeout_sec=token_timeout_sec,
+            warning=warning,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("connect failed for host %s: %s", body.host, traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Connect failed: {exc}",
+        ) from exc
 
 
 @app.delete("/api/session/{session_id}")

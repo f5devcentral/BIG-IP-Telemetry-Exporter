@@ -36,12 +36,21 @@ async function readJson<T>(r: Response): Promise<T> {
   if (!r.ok) {
     let detail = text;
     try {
-      const j = JSON.parse(text) as { detail?: string };
-      detail = j.detail ?? text;
+      const j = JSON.parse(text) as { detail?: string | Array<{ msg?: string }> };
+      if (typeof j.detail === "string") {
+        detail = j.detail;
+      } else if (Array.isArray(j.detail)) {
+        detail = j.detail.map((d) => d.msg ?? JSON.stringify(d)).join("; ");
+      }
     } catch {
       /* ignore */
     }
-    throw new Error(detail || `${r.status} ${r.statusText}`);
+    const snip = detail.replace(/\s+/g, " ").trim().slice(0, 500);
+    throw new Error(
+      snip
+        ? `${r.status} ${r.statusText}: ${snip}`
+        : `${r.status} ${r.statusText}`,
+    );
   }
   return text ? (JSON.parse(text) as T) : ({} as T);
 }

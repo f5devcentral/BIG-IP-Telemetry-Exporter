@@ -49,7 +49,9 @@ class BigIPClient:
         return self._url(f"/mgmt/shared/authz/tokens/{safe}")
 
     @staticmethod
-    def _extract_token(data: dict[str, Any]) -> str:
+    def _extract_token(data: Any) -> str:
+        if not isinstance(data, dict):
+            raise BigIPError("Login response is not a JSON object")
         token_field = data.get("token")
         if isinstance(token_field, str) and token_field.strip():
             return token_field.strip()
@@ -58,7 +60,15 @@ class BigIPClient:
                 value = token_field.get(key)
                 if isinstance(value, str) and value.strip():
                     return value.strip()
-        raise BigIPError("Login response missing token")
+        # Some versions nest differently
+        for key in ("token", "authToken"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        raise BigIPError(
+            "Login response missing token "
+            f"(keys: {', '.join(sorted(data.keys())[:12])})",
+        )
 
     def login(self) -> None:
         url = self._url("/mgmt/shared/authn/login")
