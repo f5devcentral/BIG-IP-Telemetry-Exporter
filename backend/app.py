@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -389,9 +389,47 @@ def _yaml_dump(cfg: dict[str, Any]) -> str:
     return yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
 
 
-def _mount_frontend() -> None:
-    if FRONTEND_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="ui")
+def _ui_setup_hint() -> str:
+    return (
+        "<!DOCTYPE html><html><head><title>BIG-IP Metrics Exporter</title></head><body>"
+        "<h1>BIG-IP Metrics Exporter</h1>"
+        "<p>The web UI is not built yet. From the project root run:</p>"
+        "<pre>cd frontend && npm ci && npm run build</pre>"
+        "<p>Then restart <code>python run_server.py</code> and open "
+        "<code>http://&lt;HOST-IP&gt;:8001</code>.</p>"
+        "<p>API is available: <a href=\"/docs\">/docs</a> · "
+        '<a href="/api/health">/api/health</a></p>'
+        "</body></html>"
+    )
 
 
-_mount_frontend()
+def _register_ui_routes() -> None:
+    """Serve the React build without mounting StaticFiles at '/' (avoids API route conflicts)."""
+    index_html = FRONTEND_DIST / "index.html"
+    assets_dir = FRONTEND_DIST / "assets"
+
+    @app.get("/", include_in_schema=False, response_model=None)
+    def ui_index() -> FileResponse | HTMLResponse:
+        if index_html.is_file():
+            return FileResponse(index_html)
+        return HTMLResponse(_ui_setup_hint(), status_code=200)
+
+    if assets_dir.is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(assets_dir)),
+            name="ui-assets",
+        )
+
+    @app.get("/{ui_path:path}", include_in_schema=False, response_model=None)
+    def ui_fallback(ui_path: str) -> FileResponse | HTMLResponse:
+        if ui_path.startswith("api/") or ui_path == "api":
+            raise HTTPException(status_code=404, detail="Not Found")
+        if ui_path.startswith("assets/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        if index_html.is_file():
+            return FileResponse(index_html)
+        return HTMLResponse(_ui_setup_hint(), status_code=200)
+
+
+_register_ui_routes()

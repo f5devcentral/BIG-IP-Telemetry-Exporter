@@ -150,17 +150,20 @@ nohup .venv/bin/python run_server.py > /tmp/bigip-metrics-api.log 2>&1 &
 curl -s http://127.0.0.1:8001/api/health
 ```
 
-### Step 4 — Build the web UI (production)
+### Step 4 — Build the web UI (required for the web page)
 
-In a **new terminal** on the same host:
+The UI is **not** in git — you must build it once. In a **new terminal**:
 
 ```bash
 cd ~/BIG-IP-Metrics-Exporter/frontend
 npm ci
 npm run build
+ls -la dist/index.html   # must exist
 ```
 
-The backend serves the built UI from `frontend/dist`. Restart `run_server.py` if it was already running so it picks up the new files.
+The backend serves files from `frontend/dist`. Restart `run_server.py` if it was already running.
+
+If you open the app **before** building, you will see `{"detail":"Not Found"}` or a setup hint page instead of the UI.
 
 Open the application:
 
@@ -212,6 +215,7 @@ sudo ufw allow 8889/tcp comment 'OTEL Prometheus exporter'
 | `Login failed` / TLS errors | Try with **Verify TLS** unchecked, or install the BIG-IP management CA on Ubuntu |
 | `Token extension failed` | Warning only — connection can still work (~20 min token); fix token PATCH if needed |
 | No metrics in Prometheus | Export started in UI? `docker compose logs otel-collector`; OTLP URL `http://127.0.0.1:4318` |
+| `{"detail":"Not Found"}` on `/` | Run Step 4: `cd frontend && npm ci && npm run build`, restart API |
 | UI blank after build | `frontend/dist` exists; restart `python run_server.py` |
 | `docker compose` not found | Install compose plugin: `sudo apt-get install docker-compose-plugin` |
 
