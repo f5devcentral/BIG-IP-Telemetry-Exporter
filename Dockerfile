@@ -9,7 +9,8 @@ RUN npm run build
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

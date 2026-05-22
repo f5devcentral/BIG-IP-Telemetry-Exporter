@@ -25,6 +25,8 @@ spec:
             - name: http
               containerPort: 8000
           env:
+            - name: PORT
+              value: "8000"
             - name: OTLP_HTTP_ENDPOINT
               value: http://otel-collector.bigip-metrics.svc.cluster.local:4318
             # Browser links use the request Host (your machine IP when port-forward uses --address 0.0.0.0).

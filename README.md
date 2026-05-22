@@ -2,11 +2,12 @@
 
 Pull metrics from F5 BIG-IP iControl REST APIs, export them via **OTLP** to an [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector), and validate receipt with a local **Prometheus** instance.
 
-The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Configurator](https://github.com/gregcoward/BIG-IP-Telemetry-Streaming-Validator-and-Configurator): connect to BIG-IP, select APIs, configure collector exporters, and run export.
+The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Configurator](https://github.com/gregcoward/BIG-IP-Telemetry-Streaming-Validator-and-Configurator): connect to one or more BIG-IPs, select APIs, configure collector exporters, and run export.
 
 ## Table of contents
 
 - [Architecture](#architecture)
+- [User guide](#user-guide)
 - [Installation options](#installation-options)
 - [Install on Ubuntu Linux (without Kubernetes)](#install-on-ubuntu-linux-without-kubernetes)
   - [Prerequisites](#prerequisites)
@@ -29,6 +30,7 @@ The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Co
   - [Manifests and overlays](#manifests-and-overlays)
   - [Kubernetes troubleshooting](#kubernetes-troubleshooting)
 - [Access from other machines](#access-from-other-machines)
+- [User guide (detailed)](docs/user-guide.md)
 - [API catalog](#api-catalog)
 - [Collector exporters (UI)](#collector-exporters-ui)
 - [Repository](#repository)
@@ -39,7 +41,8 @@ The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Co
 ```mermaid
 flowchart LR
   UI[React UI] --> API[Python FastAPI]
-  API --> BIGIP[BIG-IP iControl REST]
+  API --> BIGIP1[BIG-IP 1]
+  API --> BIGIP2[BIG-IP 2]
   API -->|OTLP HTTP| COL[OTEL Collector]
   COL --> PROM[Prometheus scrape :8889]
   COL --> DEST[Optional exporters OTLP debug file]
@@ -47,10 +50,165 @@ flowchart LR
 
 | Component | Role |
 |-----------|------|
-| **Python backend** | Authenticates to BIG-IP, polls selected `/mgmt/...` endpoints, converts nested stats to metric points, pushes OTLP HTTP to the collector |
+| **Python backend** | Authenticates to one or more BIG-IPs, polls selected `/mgmt/...` endpoints per device, converts nested stats to metric points tagged with `bigip.host`, pushes OTLP HTTP to the collector |
 | **OTEL Collector** | Receives OTLP; processes with batch/memory_limiter; exposes Prometheus exporter on `:8889` plus any UI-configured exporters |
 | **Prometheus** | Scrapes `otel-collector:8889` to confirm metrics flowed through the collector |
-| **React frontend** | Connection, API catalog, exporter configuration, export control |
+| **React frontend** | Multi-device connections, API catalog, exporter configuration, export control |
+
+## User guide
+
+End-to-end workflow after [installation](#installation-options). Expanded copy: [`docs/user-guide.md`](docs/user-guide.md). Kubernetes networking: [`docs/kubernetes.md`](docs/kubernetes.md).
+
+### Workflow overview
+
+```mermaid
+flowchart TD
+  A[Connect BIG-IP devices] --> B[Select iControl REST endpoints]
+  B --> C[Apply collector exporters optional]
+  C --> D[Start export OTLP]
+  D --> E[Validate in Prometheus]
+```
+
+| Step | UI section | Outcome |
+|------|------------|---------|
+| 1 | **BIG-IP connections** | One or more authenticated sessions to management IPs |
+| 2 | **API endpoints** | Choose which `/mgmt/...` paths to poll (stats paths recommended) |
+| 3 | **OpenTelemetry Collector exporters** | Optional extra sinks (remote OTLP, file, debug) |
+| 4 | **Export to collector** | Periodic poll → OTLP HTTP → collector → Prometheus scrape |
+| 5 | **Prometheus validation** | Confirm targets up and query metrics |
+
+### 1. Connect BIG-IP devices
+
+Open the UI (`http://<HOST-IP>:8001` on Ubuntu, or port-forward on Kubernetes).
+
+| Field | Notes |
+|-------|--------|
+| **Management host** | IP or hostname (HTTPS). `https://` is added automatically if omitted. |
+| **Label** | Optional friendly name (e.g. `prod-dc1`). Defaults to the host/IP. |
+| **Username / Password** | Account with iControl REST access (often `admin`). |
+| **Verify TLS** | Uncheck for default self-signed BIG-IP management certificates. |
+
+- **Connect** — first device.
+- **Add BIG-IP** — additional devices without disconnecting others.
+- **Remove** — logs out and drops that session (`DELETE /api/session/{id}`).
+- Reconnecting the **same host** replaces the previous session for that IP.
+
+Each connected device appears in a list with:
+
+- A **checkbox** — include or exclude from export (at least one must be checked before **Start export**).
+- **Label** and management address.
+- A **warning** if token extension failed (export may still work for ~20 minutes).
+
+Credentials stay in the API process memory (not written to disk by default). Restarting the backend clears all sessions.
+
+### 2. Select API endpoints
+
+The catalog comes from [`data/bigip_apis.csv`](data/bigip_apis.csv) (84 paths; 33 metrics-oriented by default).
+
+| Control | Purpose |
+|---------|---------|
+| **Metrics / stats endpoints only** | Filters to rows marked `collect_metrics=true` |
+| **Module filter** | LTM, ASM, DNS, etc. |
+| **Select all visible / Clear** | Bulk selection |
+| Per-row checkbox | Individual `/mgmt/...` paths |
+
+Defaults pre-select stats endpoints. Prefer `.../stats` paths for time-series style counters and gauges.
+
+### 3. Configure collector exporters (optional)
+
+Use **OpenTelemetry Collector exporters** to add sinks beyond the built-in Prometheus exporter on port **8889** (always used for local validation).
+
+1. Add or enable exporters (`otlp_http`, `otlp_grpc`, `debug`, `file`, etc.).
+2. **Apply collector config** — writes `otel-collector/generated-config.yaml`.
+3. Restart the collector so it picks up the file:
+
+   | Environment | Command |
+   |-------------|---------|
+   | Ubuntu + Docker | `docker compose restart otel-collector` |
+   | Kubernetes | `./scripts/k8s-apply-collector-config.sh` (with backend port-forward active) |
+
+### 4. Start export
+
+| Field | Ubuntu (default) | Kubernetes |
+|-------|------------------|--------------|
+| **OTLP HTTP endpoint** | `http://127.0.0.1:4318` | Pre-filled: `http://otel-collector.bigip-metrics.svc.cluster.local:4318` |
+| **Poll interval** | Seconds between full poll cycles (default 30) | Same |
+
+**Start export** polls every **checked** device × every selected endpoint, converts nested iControl stats to metric points, and pushes OTLP HTTP to the collector.
+
+Export status (and **Refresh status**) shows:
+
+- `running`, `bigip_count`, `bigip_hosts`
+- `last_point_count`, `last_errors_by_host` (per-device errors)
+- `poll_interval_sec`
+
+**Stop export** ends the background loop.
+
+REST equivalent: `POST /api/export/start` with body `{ "session_ids": ["..."], "endpoints": [...], "poll_interval_sec": 30, "otlp_endpoint": "..." }`. Empty `session_ids` exports all connected devices.
+
+### 5. Validate in Prometheus
+
+| Link | Default URL |
+|------|-------------|
+| Prometheus UI | `http://<HOST-IP>:9090` |
+| Collector Prometheus exporter | `http://<HOST-IP>:8889/metrics` |
+
+1. **Status → Targets** — job `otel-collector` should be **UP**.
+2. Query examples:
+
+   ```promql
+   bigip_tm_ltm_virtual_stats
+   ```
+
+   With multiple BIG-IPs, filter by device label (from metric attributes):
+
+   ```promql
+   bigip_tm_ltm_virtual_stats{bigip_host="172.16.60.123"}
+   ```
+
+   (Exact label names depend on the collector Prometheus exporter; search `bigip_` in the UI or use **Graph** autocomplete.)
+
+3. **Reload Prometheus** — refresh scrape config (`--web.enable-lifecycle` is enabled in `docker-compose.yml`).
+4. **Restart Prometheus** — full container/pod recycle when reload is not enough.
+
+On Ubuntu, restart uses `docker compose restart prometheus`. On Kubernetes, the API runs `kubectl rollout restart deployment/prometheus` in namespace `bigip-metrics`.
+
+### Multi-BIG-IP behavior
+
+| Topic | Behavior |
+|-------|----------|
+| Sessions | One session per device; list via `GET /api/bigips` |
+| Metric identity | OTLP instruments keyed per `bigip.host` so values do not overwrite across devices |
+| Attributes | `bigip.host`, `bigip.management_ip`, `bigip.endpoint` on exported points |
+| Export scope | Only devices checked in the connections list (unless using API with explicit `session_ids`) |
+| Network | Each device must be reachable from the host/pod running the Python backend |
+
+### REST API summary
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/health` | Liveness |
+| `GET` | `/api/bigips` | List connected devices |
+| `POST` | `/api/connect` | Add or replace device session |
+| `DELETE` | `/api/session/{session_id}` | Disconnect device |
+| `GET` | `/api/apis` | API catalog |
+| `POST` | `/api/export/start` | Start multi-device export |
+| `POST` | `/api/export/stop` | Stop export |
+| `GET` | `/api/export/status` | Loop status + connected devices |
+| `GET` / `POST` | `/api/collector/config` | Read/write collector YAML |
+| `POST` | `/api/prometheus/reload` | Prometheus `/-/reload` |
+| `POST` | `/api/prometheus/restart` | Restart Prometheus (docker/k8s) |
+
+### Common issues (user-facing)
+
+| Symptom | What to do |
+|---------|------------|
+| Cannot connect | Ping/curl management IP from the same host as the API; try **Verify TLS** off |
+| `401 Authentication failed` | Check user/password and REST permissions |
+| Token extension warning | Reconnect before long runs, or ignore if export is under ~20 min |
+| No metrics in Prometheus | Export running? Collector up? Correct OTLP URL for your environment |
+| Only one device in metrics | Confirm multiple devices checked; query with `bigip_host` label |
+| `{"detail":"Not Found"}` on `/` | Build UI: `cd frontend && npm ci && npm run build`, restart API |
 
 ## Installation options
 
@@ -135,13 +293,15 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Run the API (listens on **all interfaces**, port **8001** — avoids conflict with other services on 8000):
+Run the API (listens on **all interfaces**, port **8001** by default — avoids conflict with other services on 8000):
 
 ```bash
 source .venv/bin/activate
 python run_server.py
-# listens on port 8001 (override: PORT=8002 python run_server.py)
+# Default port 8001. Override: PORT=8002 python run_server.py
 ```
+
+> **Note:** The Docker/Kubernetes image sets `PORT=8000` inside the container (service port 8000). Local `run_server.py` defaults to **8001** unless `PORT` is set.
 
 Leave this terminal open, or run in the background:
 
@@ -174,15 +334,14 @@ echo "UI: http://${HOST_IP}:8001"
 
 ### Step 5 — Use the application
 
-1. Open **`http://<HOST-IP>:8001`** in a browser.
-2. **BIG-IP connections** — connect one or more management IPs (e.g. `172.16.60.123`). Use **Add BIG-IP** for additional devices; optional **Label** distinguishes them in the UI. Uncheck **Verify TLS** if using the default self-signed management certificate. Check which devices to include before **Start export**.
-3. **API endpoints** — select stats endpoints (defaults favor `/stats` paths).
-4. **OpenTelemetry Collector exporters** — configure exporters → **Apply collector config** → restart collector:
-   ```bash
-   docker compose restart otel-collector
-   ```
-5. **Export to collector** — leave OTLP endpoint as `http://127.0.0.1:4318` (backend on the same host as Docker) → **Start export**.
-6. **Prometheus validation** — open `http://<HOST-IP>:9090`, check **Status → Targets** (`otel-collector` up), query e.g. `bigip_` metrics. Use **Reload Prometheus** (refresh targets) or **Restart Prometheus** (docker compose recycle) in the UI.
+Follow the **[User guide](#user-guide)**. Quick checklist:
+
+1. Open **`http://<HOST-IP>:8001`**.
+2. **BIG-IP connections** — connect devices; use **Add BIG-IP** for more; check devices to export.
+3. **API endpoints** — select stats paths (defaults are pre-selected).
+4. **Collector exporters** (optional) → **Apply collector config** → `docker compose restart otel-collector`.
+5. **Export** — OTLP `http://127.0.0.1:4318` → **Start export**.
+6. **Prometheus** — `http://<HOST-IP>:9090`, targets up, query `bigip_*` (use `bigip_host` label when multiple devices).
 
 ### Optional — Development UI (Vite)
 
@@ -214,7 +373,8 @@ sudo ufw allow 8889/tcp comment 'OTEL Prometheus exporter'
 | `401 Authentication failed` | Username/password; account not locked; user has iControl REST permission |
 | `Login failed` / TLS errors | Try with **Verify TLS** unchecked, or install the BIG-IP management CA on Ubuntu |
 | `Token extension failed` | Warning only — connection can still work (~20 min token); fix token PATCH if needed |
-| No metrics in Prometheus | Export started in UI? `docker compose logs otel-collector`; OTLP URL `http://127.0.0.1:4318` |
+| No metrics in Prometheus | Export started? Devices checked? `docker compose logs otel-collector`; OTLP `http://127.0.0.1:4318` |
+| Multiple devices, one host in queries | Use `bigip_host` label in PromQL; confirm all devices were checked before export |
 | `{"detail":"Not Found"}` on `/` | Run Step 4: `cd frontend && npm ci && npm run build`, restart API |
 | UI blank after build | `frontend/dist` exists; restart `python run_server.py` |
 | `docker compose` not found | Install compose plugin: `sudo apt-get install docker-compose-plugin` |
@@ -324,17 +484,18 @@ kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/prometheus 9090:9090
 
 ### Step 4 — Use the application on Kubernetes
 
-1. Open **`http://<HOST-IP>:8001`**.
-2. Connect to one or more BIG-IPs (**Add BIG-IP** for each device; credentials are held in API sessions, not in Kubernetes Secrets by default).
-3. Select APIs and **Apply collector config** in the UI.
-4. Sync collector config into the cluster (with backend port-forward active):
+Follow the **[User guide](#user-guide)**. Kubernetes-specific checklist:
+
+1. Open **`http://<HOST-IP>:8001`** (port-forward `8001:8000`).
+2. Connect one or more BIG-IPs (**Add BIG-IP**); credentials stay in API memory, not Kubernetes Secrets by default.
+3. Select APIs; **Apply collector config** in the UI, then:
 
    ```bash
    ./scripts/k8s-apply-collector-config.sh
    ```
 
-5. **Start export** — backend uses in-cluster OTLP: `http://otel-collector.bigip-metrics.svc.cluster.local:4318`.
-6. Validate in Prometheus at **`http://<HOST-IP>:9090`**.
+4. **Start export** — OTLP endpoint should remain the in-cluster URL (`http://otel-collector.bigip-metrics.svc.cluster.local:4318`).
+5. Validate at **`http://<HOST-IP>:9090`** (second port-forward).
 
 ### Step 5 — Uninstall
 
@@ -384,7 +545,8 @@ Do not deploy `minimal` without pushing an image — `bigip-metrics-exporter:lat
 |---------|----------------|
 | `ErrImagePull` / `authorization failed` | Image not on Docker Hub — use [`local` overlay](#step-2--deploy-the-stack) or push to your registry |
 | `401` / connect errors in UI | Pod network → BIG-IP management IP; TLS verify setting |
-| No metrics in Prometheus | Export started? `kubectl logs -n bigip-metrics deploy/otel-collector` |
+| No metrics in Prometheus | Export started? Devices checked? `kubectl logs -n bigip-metrics deploy/otel-collector` |
+| Backend pod not ready | Probes hit port 8000 — image must set `PORT=8000` (included in `Dockerfile`) |
 | Port-forward only on localhost | Add `--address 0.0.0.0` (see Step 3) |
 
 ---

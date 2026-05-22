@@ -1,6 +1,8 @@
 # Kubernetes installation guide
 
-This document is the detailed companion to the [Kubernetes section in README](../README.md). It describes how to run the **entire** BIG-IP Metrics Exporter stack on Kubernetes:
+This document is the detailed companion to the [Kubernetes section in README](../README.md). For day-to-day UI workflow (multi-BIG-IP, export, Prometheus), see the **[User guide](user-guide.md)**.
+
+It describes how to run the **entire** BIG-IP Metrics Exporter stack on Kubernetes:
 
 - **bigip-metrics-backend** — Python API + React UI (single container image)
 - **otel-collector** — OpenTelemetry Collector Contrib
@@ -122,29 +124,41 @@ kubectl -n bigip-metrics rollout restart deployment/otel-collector
 
 ### 6. Connect to BIG-IP and start export
 
+See the **[User guide](user-guide.md)** for the full workflow. Summary:
+
+1. Open the UI (port-forward `8001:8000`).
+2. **Connect** the first BIG-IP, then **Add BIG-IP** for additional devices.
+3. Check which devices to include in export.
+4. Select API endpoints and **Start export**.
+
 Credentials are **not** stored in Kubernetes Secrets by default—they are entered in the UI per session (same as local/docker). Ensure:
 
-- The management IP is reachable from pods.
+- Every management IP is reachable from pods.
 - TLS verification matches your BIG-IP cert (checkbox in UI).
 
-The backend uses `OTLP_HTTP_ENDPOINT=http://otel-collector.bigip-metrics.svc.cluster.local:4318` (set in the Deployment).
+The backend uses `OTLP_HTTP_ENDPOINT=http://otel-collector.bigip-metrics.svc.cluster.local:4318` and listens on container port **8000** (`PORT=8000` in the Deployment).
 
 ### 7. Validate metrics in Prometheus
 
 In Prometheus, run a query such as:
 
 ```promql
-{bigip_endpoint=~".+"}
+bigip_tm_ltm_virtual_stats
 ```
 
-Or prefix search: `bigip_tm_ltm_virtual_stats`
+With multiple BIG-IPs:
 
-Confirm the `otel-collector` scrape target is **UP** (Status → Targets).
+```promql
+bigip_tm_ltm_virtual_stats{bigip_host="10.0.0.50"}
+```
+
+Confirm the `otel-collector` scrape target is **UP** (Status → Targets). Use **Reload Prometheus** or **Restart Prometheus** in the UI when needed.
 
 ## Environment variables (backend)
 
 | Variable | Default (K8s manifest) | Purpose |
 |----------|------------------------|---------|
+| `PORT` | `8000` | HTTP listen port inside the container (Service targets 8000) |
 | `OTLP_HTTP_ENDPOINT` | `http://otel-collector.bigip-metrics.svc.cluster.local:4318` | Backend → collector (in-cluster) |
 | `ACCESS_HOST` | *(unset)* | Force browser link hostname; default = HTTP `Host` header |
 | `PROMETHEUS_BROWSER_PORT` | `9090` | Prometheus UI port on the host running port-forward |
