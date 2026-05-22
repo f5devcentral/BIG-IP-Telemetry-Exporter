@@ -4,6 +4,27 @@ Pull metrics from F5 BIG-IP iControl REST APIs, export them via **OTLP** to an [
 
 The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Configurator](https://github.com/gregcoward/BIG-IP-Telemetry-Streaming-Validator-and-Configurator): connect to BIG-IP, select APIs, configure collector exporters, and run export.
 
+## Table of contents
+
+- [Architecture](#architecture)
+- [API catalog](#api-catalog)
+- [Quick start](#quick-start)
+  - [1. Observability stack](#1-observability-stack)
+  - [2. Python API](#2-python-api)
+  - [3. React UI (development)](#3-react-ui-development)
+  - [4. Production UI (optional)](#4-production-ui-optional)
+- [Workflow](#workflow)
+- [Collector exporters (UI)](#collector-exporters-ui)
+- [Kubernetes installation](#kubernetes-installation)
+  - [Architecture in the cluster](#architecture-in-the-cluster)
+  - [Prerequisites](#prerequisites)
+  - [Quick install](#quick-install)
+  - [Manifests and overlays](#manifests-and-overlays)
+  - [Post-install workflow](#post-install-workflow)
+  - [Customization](#customization)
+- [Repository](#repository)
+- [License](#license)
+
 ## Architecture
 
 ```mermaid
