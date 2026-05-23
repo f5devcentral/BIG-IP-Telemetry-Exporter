@@ -703,8 +703,8 @@ export default function App() {
           Connect one or more management addresses. Metrics are tagged per device (
           <code>bigip.host</code>). Reconnecting the same host replaces the previous session. Each
           connect creates or updates logging profiles on the device: LTM request-log (
-          <code>/Common/bigip-metrics-requestlog</code>), ASM security log (
-          <code>/Common/bigip-metrics-asm-log</code>, request-type <code>all</code>), and AFM
+          <code>/Common/bigip-metrics-requestlog</code>), ASM           ASM logging profile (
+          <code>/Common/bigip-metrics-asm-log</code>, requestType <code>all</code>), and AFM security log
           security log (<code>/Common/bigip-metrics-afm-log</code>). Attach them on virtual servers;
           OTLP log shipping is planned for a later release.
         </p>
@@ -739,7 +739,7 @@ export default function App() {
                 {d.asm_log_profile && (
                   <span
                     className="muted device-list-profile"
-                    title="Security Log Profile — ASM (all requests)"
+                    title="ASM Logging Profile (requestType all)"
                   >
                     ASM: <code>{d.asm_log_profile}</code>
                     {d.asm_log_profile_created ? " (new)" : ""}

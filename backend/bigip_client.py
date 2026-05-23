@@ -194,6 +194,9 @@ class BigIPClient:
     def patch(self, endpoint: str, *, json_body: dict[str, Any] | None = None) -> Any:
         return self._request("PATCH", endpoint, json_body=json_body)
 
+    def put(self, endpoint: str, *, json_body: dict[str, Any] | None = None) -> Any:
+        return self._request("PUT", endpoint, json_body=json_body)
+
     def logout(self) -> None:
         if not self._token:
             return

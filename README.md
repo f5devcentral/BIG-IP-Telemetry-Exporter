@@ -116,10 +116,10 @@ Each connected device appears in a list with:
 - A **warning** if token extension or logging-profile setup failed.
 - **Log profiles** — on connect the exporter creates or updates:
   - **LTM** `/Common/bigip-metrics-requestlog` — Request Logging profile (structured request/response templates)
-  - **ASM** `/Common/bigip-metrics-asm-log` — Security Log Profile with storage filter **request-type all** and response logging **all**
-  - **AFM** `/Common/bigip-metrics-afm-log` — Security Log Profile with all network firewall log categories enabled
+  - **ASM** `/Common/bigip-metrics-asm-log` — ASM Logging Profile (`/mgmt/tm/asm/logging-profiles`) with **requestType all**
+  - **AFM** `/Common/bigip-metrics-afm-log` — Security Log Profile (`/mgmt/tm/security/log/profile`) with ACL match logging and local DB publisher
 
-Attach LTM profile as **Request Logging**; attach ASM/AFM profiles as **Log Profile** on the virtual server. ASM and AFM profiles are created only when the corresponding module is provisioned on the device (level not `none` in `/mgmt/tm/sys/provision`). OTLP log forwarding will be added in a later release.
+Attach LTM profile as **Request Logging**; attach the ASM profile as an **ASM Logging Profile**; attach the AFM profile as a **Security Log Profile** (network firewall) on the virtual server. ASM and AFM profiles are created only when the corresponding module is provisioned on the device (level not `none` in `/mgmt/tm/sys/provision`). OTLP log forwarding will be added in a later release.
 
 Credentials stay in the API process memory (not written to disk by default). Restarting the backend clears all sessions.
 
@@ -132,6 +132,8 @@ Credentials stay in the API process memory (not written to disk by default). Res
 | `BIGIP_REQUEST_LOG_AUTO_CREATE` | `true` | Set `false` to skip LTM profile on connect |
 | `BIGIP_ASM_LOG_AUTO_CREATE` | `true` | Set `false` to skip ASM profile on connect |
 | `BIGIP_AFM_LOG_AUTO_CREATE` | `true` | Set `false` to skip AFM profile on connect |
+| `BIGIP_AFM_LOG_PUBLISHER` | `/Common/local-db-publisher` | Log publisher for AFM network events |
+| `BIGIP_AFM_AGGREGATE_RATE_LIMIT` | `1000` | AFM network `aggregateRateLimit` |
 
 ### 2. Select API endpoints
 
