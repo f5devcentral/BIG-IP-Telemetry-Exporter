@@ -179,12 +179,15 @@ REST equivalent: `POST /api/export/start` with body `{ "session_ids": ["..."], "
    With multiple BIG-IPs, filter by device (labels come from per-point metadata):
 
    ```promql
-   bigip_tm_ltm_virtual_stats{bigip_host="172.16.60.123"}
+   bigip_tm_sys_memory{bigip_host="172.16.60.123", bigip_stat="memoryfree"}
    ```
 
-   Useful labels: `bigip_host` / `bigip_management_ip` (device), `bigip_endpoint` (iControl path), `bigip_object` (stats object), `bigip_session_id` (API session). In Prometheus **Graph** → **Metrics** explorer, confirm these labels exist on the series.
+   One metric family per iControl stats endpoint (e.g. `bigip_tm_sys_memory`), with labels:
+   - `bigip_host` — which BIG-IP
+   - `bigip_stat` — stat field (`memoryfree`, `memorytotal`, …)
+   - `bigip_object` — short object slot (e.g. `memory_host_0`), not the full selfLink URL
 
-   If all devices still look like one series, restart export after upgrading (older builds did not attach host labels to OTLP points).
+   Compare devices: `sum by (bigip_host, bigip_stat) (bigip_tm_sys_memory)`
 
 3. **Reload Prometheus (wipe data)** — clears TSDB, then reloads scrape config (`--web.enable-lifecycle` is enabled in `docker-compose.yml`):
    - **Docker Compose:** stop/remove/recreate the `prometheus` container (empty `/prometheus`).
@@ -202,7 +205,7 @@ On Ubuntu, restart uses the same recreate path as reload wipe. On Kubernetes, th
 |-------|----------|
 | Sessions | One session per device; list via `GET /api/bigips` |
 | Metric identity | OTLP instruments keyed per `bigip.host` so values do not overwrite across devices |
-| Attributes (Prometheus labels) | `bigip_host`, `bigip_management_ip`, `bigip_endpoint`, `bigip_object`, `bigip_source`, `bigip_session_id` on each data point |
+| Attributes (Prometheus labels) | `bigip_host` (device), `bigip_stat` (counter name, e.g. `memoryfree`), `bigip_object` (short stats object path) |
 | Export scope | Only devices checked in the connections list (unless using API with explicit `session_ids`) |
 | Network | Each device must be reachable from the host/pod running the Python backend |
 

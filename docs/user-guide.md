@@ -142,20 +142,18 @@ Empty `session_ids` exports **all** connected devices. To target specific device
 
 1. **Status → Targets** — `otel-collector` job should be **UP**.
 2. Run a broad query: `bigip_tm_ltm_virtual_stats` or search `bigip_`.
-3. With multiple devices, filter by host label. Each point includes metadata that becomes Prometheus labels:
+3. With multiple devices, use metric families plus labels (not one series per URL blob):
 
    | Label | Meaning |
    |-------|---------|
-   | `bigip_host` | BIG-IP management address for the poll |
-   | `bigip_endpoint` | iControl REST path |
-   | `bigip_object` | Stats object name in the payload |
-   | `bigip_session_id` | Exporter session for that device |
+   | `bigip_host` | BIG-IP management address |
+   | `bigip_stat` | Stat field name (`memoryfree`, `clientside.bitsIn`, …) |
+   | `bigip_object` | Short stats object slot (e.g. `memory_host_0`) |
 
    ```promql
-   bigip_tm_ltm_virtual_stats{bigip_host="10.0.0.50"}
+   bigip_tm_sys_memory{bigip_host="10.0.0.50", bigip_stat="memoryused"}
+   sum by (bigip_host, bigip_stat) (bigip_tm_sys_memory)
    ```
-
-   If `bigip_host` is missing on series, upgrade the exporter and restart **Start export** (older code did not attach labels to OTLP recordings).
 
 4. Use **Reload Prometheus (wipe data)** in the UI to clear TSDB and reload scrape config. By default this recreates the Prometheus container (Docker) or pod (Kubernetes), or deletes all series via the admin API when orchestration tools are unavailable. Set backend env `PROMETHEUS_RELOAD_WIPE_TSDB=false` to reload config only.
 5. Use **Restart Prometheus** for a recreate without the separate `/-/reload` step.
@@ -166,7 +164,7 @@ Empty `session_ids` exports **all** connected devices. To target specific device
 |-------|--------|
 | API list devices | `GET /api/bigips` or `GET /api/devices` |
 | Connect | `POST /api/connect` with optional `label` |
-| Metric collision | Prevented via `bigip_host` (and related) labels on each OTLP data point |
+| Metric collision | One metric name per REST stats endpoint; separated by `bigip_host`, `bigip_stat`, `bigip_object` labels |
 | Export scope (UI) | Checked devices only |
 | Export scope (API) | `session_ids` array; empty = all connected |
 

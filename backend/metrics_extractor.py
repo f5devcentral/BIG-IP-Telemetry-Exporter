@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any, Iterator
 
+# BIG-IP nestedStats entry keys are often full selfLink URLs — avoid using them in metric names.
+_URLISH = re.compile(r"^https?://|^https_", re.I)
+
 
 def _sanitize_name(part: str) -> str:
     part = part.replace("~", "").replace("/", "_").replace("-", "_").replace(".", "_")
@@ -14,9 +17,32 @@ def _sanitize_name(part: str) -> str:
 
 
 def endpoint_metric_prefix(endpoint: str) -> str:
-    """e.g. /mgmt/tm/ltm/virtual/stats -> bigip_tm_ltm_virtual_stats"""
+    """e.g. /mgmt/tm/sys/memory -> bigip_tm_sys_memory"""
     path = endpoint.strip("/").replace("mgmt/", "", 1)
     return "bigip_" + _sanitize_name(path)
+
+
+def _entry_segment(key: str, index: int) -> str:
+    """Short path segment for nestedStats entry keys (often URLs)."""
+    raw = str(key).strip()
+    if "://" in raw:
+        tail = raw.rstrip("/").split("/")[-1] or f"entry_{index}"
+        return _sanitize_name(tail)
+    seg = _sanitize_name(raw)
+    if _URLISH.match(seg) or seg.startswith("https_") or len(seg) > 40:
+        return f"entry_{index}"
+    return seg
+
+
+def _compact_object_label(object_path: list[str]) -> str:
+    """Short object label for Prometheus (avoids duplicating URL blobs)."""
+    if not object_path:
+        return "root"
+    # Prefer non-entry_* segments when present; otherwise last entry slot.
+    meaningful = [p for p in object_path if not p.startswith("entry_")]
+    parts = meaningful[-2:] if meaningful else object_path[-1:]
+    label = ".".join(parts)
+    return label[:48] if len(label) > 48 else label
 
 
 def _walk_nested_stats(
@@ -30,19 +56,19 @@ def _walk_nested_stats(
         if "nestedStats" in obj:
             entries = obj.get("nestedStats", {}).get("entries", {})
             if isinstance(entries, dict):
-                for key, val in entries.items():
+                for idx, (key, val) in enumerate(entries.items()):
                     yield from _walk_nested_stats(
                         val,
-                        object_path=object_path + [_sanitize_name(str(key))],
+                        object_path=object_path + [_entry_segment(key, idx)],
                         endpoint=endpoint,
                         bigip_host=bigip_host,
                     )
             return
         if "entries" in obj and isinstance(obj["entries"], dict):
-            for key, val in obj["entries"].items():
+            for idx, (key, val) in enumerate(obj["entries"].items()):
                 yield from _walk_nested_stats(
                     val,
-                    object_path=object_path + [_sanitize_name(str(key))],
+                    object_path=object_path + [_entry_segment(key, idx)],
                     endpoint=endpoint,
                     bigip_host=bigip_host,
                 )
@@ -51,14 +77,12 @@ def _walk_nested_stats(
             if key in ("kind", "selfLink", "generation", "description", "isSubcollection"):
                 continue
             if isinstance(val, (int, float)) and not isinstance(val, bool):
-                name_parts = [endpoint_metric_prefix(endpoint), *object_path, _sanitize_name(str(key))]
-                metric_name = ".".join(p for p in name_parts if p)
+                stat = _sanitize_name(str(key))
+                metric_name = endpoint_metric_prefix(endpoint)
                 attrs = {
-                    "bigip.endpoint": endpoint,
-                    "bigip.object": ".".join(object_path) if object_path else "root",
                     "bigip.host": bigip_host,
-                    "bigip.management_ip": bigip_host,
-                    "bigip.source": bigip_host,
+                    "bigip.stat": stat,
+                    "bigip.object": _compact_object_label(object_path),
                 }
                 yield metric_name, float(val), attrs
             elif isinstance(val, dict):

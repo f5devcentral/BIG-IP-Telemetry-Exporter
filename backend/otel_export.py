@@ -122,9 +122,6 @@ class MetricsExportLoop:
                 try:
                     payload = client.get(ep)
                     points = extract_metrics(ep, payload, bigip_host=host)
-                    for point in points:
-                        point.setdefault("attributes", {})
-                        point["attributes"]["bigip.session_id"] = sid
                     total += self._pusher.record_batch(points)
                 except Exception as exc:  # noqa: BLE001
                     msg = f"{ep}: {exc}"
