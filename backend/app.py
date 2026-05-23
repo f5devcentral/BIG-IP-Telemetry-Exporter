@@ -84,6 +84,8 @@ class _Session:
     http_analytics_profile_created: bool | None = None
     tcp_analytics_profile: str | None = None
     tcp_analytics_profile_created: bool | None = None
+    export_metrics: bool = True
+    export_logs: bool = True
 
 
 _sessions: dict[str, _Session] = {}
@@ -156,6 +158,8 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
         "http_analytics_profile_created": sess.http_analytics_profile_created,
         "tcp_analytics_profile": sess.tcp_analytics_profile,
         "tcp_analytics_profile_created": sess.tcp_analytics_profile_created,
+        "export_metrics": sess.export_metrics,
+        "export_logs": sess.export_logs,
         "connected_since": sess.created,
     }
 
@@ -199,6 +203,8 @@ class ConnectBody(BaseModel):
     password: str
     verify_tls: bool = False
     label: str = ""
+    export_metrics: bool = True
+    export_logs: bool = True
 
 
 class ConnectResponse(BaseModel):
@@ -216,6 +222,8 @@ class ConnectResponse(BaseModel):
     http_analytics_profile_created: bool | None = None
     tcp_analytics_profile: str | None = None
     tcp_analytics_profile_created: bool | None = None
+    export_metrics: bool = True
+    export_logs: bool = True
 
 
 class ExporterItem(BaseModel):
@@ -330,6 +338,11 @@ def list_devices() -> dict[str, Any]:
 
 @app.post("/api/connect", response_model=ConnectResponse)
 def connect(body: ConnectBody) -> ConnectResponse:
+    if not body.export_metrics and not body.export_logs:
+        raise HTTPException(
+            status_code=400,
+            detail="Select at least one of export metrics or export logs.",
+        )
     try:
         existing = _find_session_id_for_host(body.host)
         if existing:
@@ -372,24 +385,25 @@ def connect(body: ConnectBody) -> ConnectResponse:
         http_analytics_profile_created: bool | None = None
         tcp_analytics_profile: str | None = None
         tcp_analytics_profile_created: bool | None = None
-        try:
-            profiles = ensure_log_profiles_via_as3(client)
-            request_log_profile = profiles.request_log_profile
-            request_log_profile_created = profiles.request_log_profile_created
-            asm_log_profile = profiles.asm_log_profile
-            asm_log_profile_created = profiles.asm_log_profile_created
-            afm_log_profile = profiles.afm_log_profile
-            afm_log_profile_created = profiles.afm_log_profile_created
-            http_analytics_profile = profiles.http_analytics_profile
-            http_analytics_profile_created = profiles.http_analytics_profile_created
-            tcp_analytics_profile = profiles.tcp_analytics_profile
-            tcp_analytics_profile_created = profiles.tcp_analytics_profile_created
-        except BigIPError as exc:
-            warning = _append_warning(
-                warning,
-                f"Connected, but could not create or update logging/analytics profiles "
-                f"via AS3 ({exc}).",
-            )
+        if body.export_logs:
+            try:
+                profiles = ensure_log_profiles_via_as3(client)
+                request_log_profile = profiles.request_log_profile
+                request_log_profile_created = profiles.request_log_profile_created
+                asm_log_profile = profiles.asm_log_profile
+                asm_log_profile_created = profiles.asm_log_profile_created
+                afm_log_profile = profiles.afm_log_profile
+                afm_log_profile_created = profiles.afm_log_profile_created
+                http_analytics_profile = profiles.http_analytics_profile
+                http_analytics_profile_created = profiles.http_analytics_profile_created
+                tcp_analytics_profile = profiles.tcp_analytics_profile
+                tcp_analytics_profile_created = profiles.tcp_analytics_profile_created
+            except BigIPError as exc:
+                warning = _append_warning(
+                    warning,
+                    f"Connected, but could not create or update logging/analytics profiles "
+                    f"via AS3 ({exc}).",
+                )
 
         host_norm = _normalize_host(body.host)
         label = (body.label or "").strip() or _display_host(host_norm)
@@ -411,6 +425,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
             http_analytics_profile_created=http_analytics_profile_created,
             tcp_analytics_profile=tcp_analytics_profile,
             tcp_analytics_profile_created=tcp_analytics_profile_created,
+            export_metrics=body.export_metrics,
+            export_logs=body.export_logs,
         )
         return ConnectResponse(
             session_id=sid,
@@ -427,6 +443,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
             http_analytics_profile_created=http_analytics_profile_created,
             tcp_analytics_profile=tcp_analytics_profile,
             tcp_analytics_profile_created=tcp_analytics_profile_created,
+            export_metrics=body.export_metrics,
+            export_logs=body.export_logs,
         )
     except HTTPException:
         raise
@@ -545,9 +563,18 @@ def _resolve_export_clients(session_ids: list[str]) -> list[tuple[str, str, BigI
             detail="No BIG-IP devices connected. Add at least one device before starting export.",
         )
     clients: list[tuple[str, str, BigIPClient]] = []
+    skipped: list[str] = []
     for sid in ids:
         sess = _get_session(sid)
+        if not sess.export_metrics:
+            skipped.append(sess.label or _display_host(sess.host))
+            continue
         clients.append((_display_host(sess.host), sid, sess.client))
+    if not clients:
+        detail = "No selected devices have metrics export enabled."
+        if skipped:
+            detail += f" Skipped (logs only): {', '.join(skipped)}."
+        raise HTTPException(status_code=400, detail=detail)
     return clients
 
 

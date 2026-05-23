@@ -74,8 +74,19 @@ type BigIPDevice = {
   http_analytics_profile_created?: boolean | null;
   tcp_analytics_profile?: string | null;
   tcp_analytics_profile_created?: boolean | null;
+  export_metrics?: boolean;
+  export_logs?: boolean;
   connected_since?: number;
 };
+
+function exportModeLabel(device: BigIPDevice): string {
+  const metrics = device.export_metrics !== false;
+  const logs = device.export_logs !== false;
+  if (metrics && logs) return "Metrics + logs";
+  if (metrics) return "Metrics only";
+  if (logs) return "Logs only";
+  return "None";
+}
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   try {
@@ -138,6 +149,8 @@ export default function App() {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [verifyTls, setVerifyTls] = useState(false);
+  const [connectExportMetrics, setConnectExportMetrics] = useState(true);
+  const [connectExportLogs, setConnectExportLogs] = useState(true);
   const [devices, setDevices] = useState<BigIPDevice[]>([]);
   const [exportDeviceIds, setExportDeviceIds] = useState<Set<string>>(new Set());
 
@@ -274,13 +287,21 @@ export default function App() {
   );
 
   const canConnect = useMemo(
-    () => Boolean(host.trim() && username.trim() && password),
-    [host, username, password],
+    () =>
+      Boolean(
+        host.trim() &&
+          username.trim() &&
+          password &&
+          (connectExportMetrics || connectExportLogs),
+      ),
+    [host, username, password, connectExportMetrics, connectExportLogs],
   );
 
   const connect = useCallback(async () => {
     if (!canConnect) {
-      setError("Management host, username, and password are required");
+      setError(
+        "Management host, username, password, and at least one of metrics or logs are required",
+      );
       return;
     }
     setBusy(true);
@@ -296,13 +317,14 @@ export default function App() {
           password,
           verify_tls: verifyTls,
           label: deviceLabel.trim(),
+          export_metrics: connectExportMetrics,
+          export_logs: connectExportLogs,
         }),
       });
       const data = await readJson<{
         session_id: string;
         warning?: string;
-        request_log_profile?: string;
-        request_log_profile_created?: boolean;
+        export_metrics?: boolean;
       }>(r);
       setConnectWarning(data.warning ?? null);
       setHost("");
@@ -310,13 +332,25 @@ export default function App() {
       setUsername("");
       setPassword("");
       await refreshDevices();
-      setExportDeviceIds((prev) => new Set(prev).add(data.session_id));
+      if (connectExportMetrics) {
+        setExportDeviceIds((prev) => new Set(prev).add(data.session_id));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [canConnect, host, deviceLabel, username, password, verifyTls, refreshDevices]);
+  }, [
+    canConnect,
+    host,
+    deviceLabel,
+    username,
+    password,
+    verifyTls,
+    connectExportMetrics,
+    connectExportLogs,
+    refreshDevices,
+  ]);
 
   const disconnectDevice = useCallback(
     async (sessionId: string) => {
@@ -384,7 +418,15 @@ export default function App() {
       setError("Select at least one BIG-IP device for export");
       return;
     }
-    const sessionIds = Array.from(exportDeviceIds);
+    const sessionIds = devices
+      .filter((d) => exportDeviceIds.has(d.session_id) && d.export_metrics !== false)
+      .map((d) => d.session_id);
+    if (sessionIds.length === 0) {
+      setError(
+        "No checked devices have metrics export enabled. Connect with Export metrics or change selection.",
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -724,6 +766,10 @@ export default function App() {
                   <span>
                     <strong>{d.label || d.display_host}</strong>
                     <span className="muted device-list-host"> — {d.display_host}</span>
+                    <span className="muted device-list-export-mode" title="Connect options">
+                      {" "}
+                      ({exportModeLabel(d)})
+                    </span>
                   </span>
                 </label>
                 {d.request_log_profile && (
@@ -810,6 +856,25 @@ export default function App() {
             />
           </div>
         </div>
+        <div className="connect-export-options">
+          <span className="connect-export-options-label">On connect</span>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={connectExportMetrics}
+              onChange={(e) => setConnectExportMetrics(e.target.checked)}
+            />
+            Export metrics
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={connectExportLogs}
+              onChange={(e) => setConnectExportLogs(e.target.checked)}
+            />
+            Export logs (create logging profiles)
+          </label>
+        </div>
         <label className="check">
           <input
             type="checkbox"
@@ -827,7 +892,7 @@ export default function App() {
             title={
               canConnect
                 ? undefined
-                : "Enter management host, username, and password to connect"
+                : "Enter host, credentials, and select metrics and/or logs"
             }
           >
             {devices.length > 0 ? "Add BIG-IP" : "Connect"}

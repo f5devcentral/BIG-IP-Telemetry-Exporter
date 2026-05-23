@@ -254,6 +254,20 @@ a:hover {
   color: var(--text);
 }
 
+.connect-export-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  margin: 0.75rem 0;
+}
+
+.connect-export-options-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .api-table-wrap {
   max-height: 280px;
   overflow: auto;
@@ -518,6 +532,10 @@ a:hover {
 
 .device-list-host {
   font-weight: 400;
+}
+
+.device-list-export-mode {
+  font-size: 0.85rem;
 }
 
 .device-list-profile {
