@@ -139,38 +139,60 @@ class BigIPClient:
                 f"Token extension failed ({r.status_code}): {detail or 'no response body'}",
             )
 
-    def get(self, endpoint: str, *, params: dict[str, Any] | None = None) -> Any:
-        if not self._token:
-            self.login()
-        url = self._url(endpoint)
-        try:
-            r = self._session.get(
-                url,
-                params=params,
-                verify=self.verify_tls,
-                timeout=self.timeout,
-            )
-        except requests.RequestException as exc:
-            raise BigIPError(f"GET {endpoint} failed: {exc}") from exc
-        if r.status_code == 401:
-            self.login()
-            try:
-                r = self._session.get(
-                    url,
-                    params=params,
-                    verify=self.verify_tls,
-                    timeout=self.timeout,
-                )
-            except requests.RequestException as exc:
-                raise BigIPError(f"GET {endpoint} failed: {exc}") from exc
-        if r.status_code >= 400:
-            raise BigIPError(f"GET {endpoint} failed ({r.status_code}): {r.text[:400]}")
+    @staticmethod
+    def _parse_json_response(endpoint: str, r: requests.Response) -> Any:
         if not r.text.strip():
             return {}
         try:
             return r.json()
         except json.JSONDecodeError as exc:
             raise BigIPError(f"Non-JSON response from {endpoint}") from exc
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+    ) -> Any:
+        if not self._token:
+            self.login()
+        url = self._url(endpoint)
+        headers = {"Content-Type": "application/json"} if json_body is not None else None
+
+        def send() -> requests.Response:
+            try:
+                return self._session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    verify=self.verify_tls,
+                    timeout=self.timeout,
+                    headers=headers,
+                )
+            except requests.RequestException as exc:
+                raise BigIPError(f"{method} {endpoint} failed: {exc}") from exc
+
+        r = send()
+        if r.status_code == 401:
+            self.login()
+            r = send()
+        if r.status_code >= 400:
+            raise BigIPError(
+                f"{method} {endpoint} failed ({r.status_code}): {r.text[:400]}",
+            )
+        return self._parse_json_response(endpoint, r)
+
+    def get(self, endpoint: str, *, params: dict[str, Any] | None = None) -> Any:
+        return self._request("GET", endpoint, params=params)
+
+    def post(self, endpoint: str, *, json_body: dict[str, Any] | None = None) -> Any:
+        return self._request("POST", endpoint, json_body=json_body)
+
+    def patch(self, endpoint: str, *, json_body: dict[str, Any] | None = None) -> Any:
+        return self._request("PATCH", endpoint, json_body=json_body)
 
     def logout(self) -> None:
         if not self._token:

@@ -64,6 +64,8 @@ type BigIPDevice = {
   label: string;
   token_timeout_sec?: number;
   warning?: string | null;
+  request_log_profile?: string | null;
+  request_log_profile_created?: boolean | null;
   connected_since?: number;
 };
 
@@ -288,7 +290,12 @@ export default function App() {
           label: deviceLabel.trim(),
         }),
       });
-      const data = await readJson<{ session_id: string; warning?: string }>(r);
+      const data = await readJson<{
+        session_id: string;
+        warning?: string;
+        request_log_profile?: string;
+        request_log_profile_created?: boolean;
+      }>(r);
       setConnectWarning(data.warning ?? null);
       setHost("");
       setDeviceLabel("");
@@ -690,7 +697,10 @@ export default function App() {
         <h2>BIG-IP connections ({devices.length} connected)</h2>
         <p className="muted">
           Connect one or more management addresses. Metrics are tagged per device (
-          <code>bigip.host</code>). Reconnecting the same host replaces the previous session.
+          <code>bigip.host</code>). Reconnecting the same host replaces the previous session. Each
+          connect creates or updates an LTM request/response logging profile (
+          <code>/Common/bigip-metrics-requestlog</code> by default) that you can attach to virtual
+          servers; log shipping to the OpenTelemetry collector is planned for a later release.
         </p>
         <h3 className="subsection-title">Currently connected</h3>
         {devices.length === 0 ? (
@@ -711,6 +721,12 @@ export default function App() {
                     <span className="muted device-list-host"> — {d.display_host}</span>
                   </span>
                 </label>
+                {d.request_log_profile && (
+                  <span className="muted device-list-profile" title="Attach as Request Logging profile on virtual servers">
+                    Log profile: <code>{d.request_log_profile}</code>
+                    {d.request_log_profile_created ? " (new)" : ""}
+                  </span>
+                )}
                 {d.warning && <span className="device-list-warn">{d.warning}</span>}
                 <button
                   type="button"

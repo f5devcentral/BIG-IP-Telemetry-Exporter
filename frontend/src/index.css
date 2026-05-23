@@ -520,6 +520,11 @@ a:hover {
   font-weight: 400;
 }
 
+.device-list-profile {
+  font-size: 0.85rem;
+  max-width: 28rem;
+}
+
 .device-list-warn {
   flex: 1 1 100%;
   font-size: 0.85rem;

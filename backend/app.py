@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 logger = logging.getLogger(__name__)
 
 from backend.bigip_client import BigIPClient, BigIPError
+from backend.ltm_request_log import ensure_request_log_profile
 from backend.collector_config import (
     CONTRIB_EXPORTERS_REPO,
     EXPORTER_TYPES,
@@ -73,6 +74,8 @@ class _Session:
     created: float
     token_timeout_sec: int = 1200
     warning: str | None = None
+    request_log_profile: str | None = None
+    request_log_profile_created: bool | None = None
 
 
 _sessions: dict[str, _Session] = {}
@@ -121,6 +124,12 @@ def _get_session(session_id: str) -> _Session:
     return s
 
 
+def _append_warning(warning: str | None, message: str) -> str:
+    if warning:
+        return f"{warning} {message}"
+    return message
+
+
 def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
     return {
         "session_id": session_id,
@@ -129,6 +138,8 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
         "label": sess.label,
         "token_timeout_sec": sess.token_timeout_sec,
         "warning": sess.warning,
+        "request_log_profile": sess.request_log_profile,
+        "request_log_profile_created": sess.request_log_profile_created,
         "connected_since": sess.created,
     }
 
@@ -179,6 +190,8 @@ class ConnectResponse(BaseModel):
     host: str
     token_timeout_sec: int = 1200
     warning: str | None = None
+    request_log_profile: str | None = None
+    request_log_profile_created: bool | None = None
 
 
 class ExporterItem(BaseModel):
@@ -319,9 +332,23 @@ def connect(body: ConnectBody) -> ConnectResponse:
             client.extend_token()
             token_timeout_sec = 3600
         except BigIPError as exc:
-            warning = (
+            warning = _append_warning(
+                None,
                 f"Connected, but could not extend auth token ({exc}). "
-                "Long export runs may need to reconnect if the session expires."
+                "Long export runs may need to reconnect if the session expires.",
+            )
+
+        request_log_profile: str | None = None
+        request_log_profile_created: bool | None = None
+        try:
+            profile_result = ensure_request_log_profile(client)
+            request_log_profile = profile_result.full_name
+            request_log_profile_created = profile_result.created
+        except BigIPError as exc:
+            warning = _append_warning(
+                warning,
+                f"Connected, but could not create or update the request/response "
+                f"logging profile ({exc}).",
             )
 
         host_norm = _normalize_host(body.host)
@@ -334,12 +361,16 @@ def connect(body: ConnectBody) -> ConnectResponse:
             created=time.time(),
             token_timeout_sec=token_timeout_sec,
             warning=warning,
+            request_log_profile=request_log_profile,
+            request_log_profile_created=request_log_profile_created,
         )
         return ConnectResponse(
             session_id=sid,
             host=host_norm,
             token_timeout_sec=token_timeout_sec,
             warning=warning,
+            request_log_profile=request_log_profile,
+            request_log_profile_created=request_log_profile_created,
         )
     except HTTPException:
         raise

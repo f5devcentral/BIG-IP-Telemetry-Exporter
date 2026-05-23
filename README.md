@@ -113,9 +113,16 @@ Each connected device appears in a list with:
 
 - A **checkbox** — include or exclude from export (at least one must be checked before **Start export**).
 - **Label** and management address.
-- A **warning** if token extension failed (export may still work for ~20 minutes).
+- A **warning** if token extension or logging-profile setup failed.
+- **Log profile** — LTM request/response logging profile created or updated on the device (default `/Common/bigip-metrics-requestlog`). Attach it to virtual servers as a **Request Logging** profile; OTLP log forwarding will be added in a later release.
 
 Credentials stay in the API process memory (not written to disk by default). Restarting the backend clears all sessions.
+
+| Environment variable | Default | Purpose |
+|---------------------|---------|---------|
+| `BIGIP_REQUEST_LOG_PROFILE_NAME` | `bigip-metrics-requestlog` | Profile name in `Common` |
+| `BIGIP_REQUEST_LOG_PARTITION` | `Common` | Partition for the profile |
+| `BIGIP_REQUEST_LOG_AUTO_CREATE` | `true` | Set `false` to skip profile creation on connect |
 
 ### 2. Select API endpoints
 

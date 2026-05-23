@@ -45,7 +45,10 @@ When devices are connected, the **Connected status bar** at the top lists each o
 |---------|--------|
 | Checkbox | Include device in export |
 | **Remove** | Disconnect (`DELETE /api/session/{session_id}`) |
-| Warning text | Token extension failed; session may expire sooner |
+| Warning text | Token extension or logging-profile setup failed |
+| Log profile | Request/response logging profile on BIG-IP (default `/Common/bigip-metrics-requestlog`) |
+
+On connect, the exporter creates or updates an LTM **request-log** profile with request and response logging enabled. Attach it to virtual servers as a **Request Logging** profile (tmsh: `profiles { bigip-metrics-requestlog { } }` under the virtual). Shipping those logs to the OpenTelemetry collector is planned for a later release.
 
 Reconnecting the same management IP **replaces** the existing session for that host.
 
