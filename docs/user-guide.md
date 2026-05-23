@@ -48,7 +48,7 @@ When devices are connected, the **Connected status bar** at the top lists each o
 | Warning text | Token extension or logging-profile setup failed |
 | Log profile | Request/response logging profile on BIG-IP (default `/Common/bigip-metrics-requestlog`) |
 
-On connect, the exporter creates or updates an LTM **request-log** profile with request and response logging enabled. Attach it to virtual servers as a **Request Logging** profile (tmsh: `profiles { bigip-metrics-requestlog { } }` under the virtual). Shipping those logs to the OpenTelemetry collector is planned for a later release.
+On connect, the exporter creates or updates an LTM **request-log** profile with request and response logging enabled and structured `requestLogTemplate` / `responseLogTemplate` fields (hostname, client/server IP, HTTP method/URI, virtual name, timestamps, and on responses status code and latency). Attach it to virtual servers as a **Request Logging** profile (tmsh: `profiles { bigip-metrics-requestlog { } }` under the virtual). Shipping those logs to the OpenTelemetry collector is planned for a later release.
 
 Reconnecting the same management IP **replaces** the existing session for that host.
 

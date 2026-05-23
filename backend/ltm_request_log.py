@@ -15,6 +15,17 @@ PROFILE_DESCRIPTION = (
     "profile; request/response logs will be forwarded to the OpenTelemetry collector in a "
     "future release."
 )
+REQUEST_LOG_TEMPLATE = (
+    'event_source="request_logging",hostname="$BIGIP_HOSTNAME",client_ip="$CLIENT_IP",'
+    'server_ip="$SERVER_IP",http_method="$HTTP_METHOD",http_uri="$HTTP_URI",'
+    'virtual_name="$VIRTUAL_NAME",event_timestamp="$DATE_HTTP"'
+)
+RESPONSE_LOG_TEMPLATE = (
+    'event_source="response_logging",hostname="$BIGIP_HOSTNAME",client_ip="$CLIENT_IP",'
+    'server_ip="$SERVER_IP",http_method="$HTTP_METHOD",http_uri="$HTTP_URI",'
+    'virtual_name="$VIRTUAL_NAME",event_timestamp="$DATE_HTTP",'
+    'http_statcode="$HTTP_STATCODE",http_status="$HTTP_STATUS",response_ms="$RESPONSE_MSECS"'
+)
 
 
 @dataclass(frozen=True)
@@ -59,13 +70,21 @@ def profile_full_name(*, partition: str | None = None, name: str | None = None) 
     return f"/{part}/{prof}"
 
 
+def _profile_settings() -> dict[str, str]:
+    return {
+        "description": PROFILE_DESCRIPTION,
+        "requestLogging": "enabled",
+        "responseLogging": "enabled",
+        "requestLogTemplate": REQUEST_LOG_TEMPLATE,
+        "responseLogTemplate": RESPONSE_LOG_TEMPLATE,
+    }
+
+
 def _desired_profile_body(*, partition: str, name: str) -> dict[str, str]:
     return {
         "name": name,
         "partition": partition,
-        "description": PROFILE_DESCRIPTION,
-        "requestLogging": "enabled",
-        "responseLogging": "enabled",
+        **_profile_settings(),
     }
 
 
@@ -102,12 +121,5 @@ def ensure_request_log_profile(
         client.post(PROFILE_COLLECTION, json_body=desired)
         return RequestLogProfileResult(full_name=full, instance_path=path, created=True)
 
-    client.patch(
-        path,
-        json_body={
-            "description": desired["description"],
-            "requestLogging": desired["requestLogging"],
-            "responseLogging": desired["responseLogging"],
-        },
-    )
+    client.patch(path, json_body=_profile_settings())
     return RequestLogProfileResult(full_name=full, instance_path=path, created=False)
