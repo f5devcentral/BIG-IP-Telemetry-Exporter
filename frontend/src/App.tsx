@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-const f5LogoUrl = "/F5-logo-F5-rgb.svg";
+import f5LogoUrl from "../../F5-logo-F5-rgb.svg";
 
 const THEME_STORAGE_KEY = "bigip-metrics-ui-theme";
 type ThemeMode = "light" | "dark" | "system";
