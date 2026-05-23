@@ -133,11 +133,37 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
     }
 
 
+def _normalize_api_row(row: dict[str, str]) -> dict[str, str]:
+    """Normalize module/category for paths that share a URL prefix but map to a licensed module."""
+    endpoint = (row.get("endpoint") or "").strip().lower()
+    out = dict(row)
+    if "/mgmt/tm/asm" in endpoint:
+        out["module"] = "ASM"
+        if not (out.get("category") or "").strip():
+            out["category"] = "ASM Module"
+        return out
+    if "/mgmt/tm/security/firewall" in endpoint:
+        out["module"] = "AFM"
+        if not (out.get("category") or "").strip():
+            out["category"] = "AFM Module"
+        return out
+    return row
+
+
 def _load_apis() -> list[dict[str, str]]:
     if not APIS_CSV.exists():
         return []
     with APIS_CSV.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+        return [_normalize_api_row(r) for r in csv.DictReader(f)]
+
+
+def _module_counts(rows: list[dict[str, str]] | None = None) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows if rows is not None else _load_apis():
+        mod = (row.get("module") or "").strip().upper()
+        if mod:
+            counts[mod] = counts.get(mod, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 class ConnectBody(BaseModel):
@@ -244,8 +270,13 @@ def list_apis(
     if module:
         mod = module.upper()
         rows = [r for r in rows if (r.get("module") or "").upper() == mod]
-    modules = sorted({(r.get("module") or "").upper() for r in _load_apis() if r.get("module")})
-    return {"apis": rows, "count": len(rows), "modules": modules}
+    counts = _module_counts()
+    return {
+        "apis": rows,
+        "count": len(rows),
+        "modules": list(counts.keys()),
+        "module_counts": counts,
+    }
 
 
 @app.get("/api/bigips")

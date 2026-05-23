@@ -132,7 +132,6 @@ export default function App() {
   const [exportDeviceIds, setExportDeviceIds] = useState<Set<string>>(new Set());
 
   const [apis, setApis] = useState<ApiRow[]>([]);
-  const [modules, setModules] = useState<string[]>([]);
   const [metricsOnly, setMetricsOnly] = useState(true);
   const [moduleFilter, setModuleFilter] = useState("");
   const [selectedEndpoints, setSelectedEndpoints] = useState<Set<string>>(new Set());
@@ -194,7 +193,11 @@ export default function App() {
           apiFetch("/api/runtime-config"),
           apiFetch("/api/prometheus/control"),
         ]);
-        const apiData = await readJson<{ apis: ApiRow[]; modules: string[] }>(apiRes);
+        const apiData = await readJson<{
+          apis: ApiRow[];
+          modules?: string[];
+          module_counts?: Record<string, number>;
+        }>(apiRes);
         const catData = await readJson<{
           exporters: ExporterCatalogItem[];
           categories?: string[];
@@ -205,7 +208,6 @@ export default function App() {
         const promCtrl = await readJson<PromControl>(promCtrlRes);
         const runtime = await readJson<{ otlp_endpoint?: string }>(runtimeRes);
         setApis(apiData.apis);
-        setModules(apiData.modules);
         setCatalog(catData.exporters);
         setCatalogCategories(catData.categories ?? []);
         setContribComponents(catData.contrib_components ?? []);
@@ -235,13 +237,31 @@ export default function App() {
     return devices.filter((d) => exportDeviceIds.has(d.session_id));
   }, [devices, exportDeviceIds]);
 
+  const moduleFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of apis) {
+      const mod = (a.module || "").trim().toUpperCase();
+      if (!mod) continue;
+      counts.set(mod, (counts.get(mod) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([mod, total]) => ({ mod, total }));
+  }, [apis]);
+
   const filteredApis = useMemo(() => {
     return apis.filter((a) => {
       if (metricsOnly && a.collect_metrics !== "true") return false;
-      if (moduleFilter && (a.module || "").toUpperCase() !== moduleFilter) return false;
+      const mod = (a.module || "").trim().toUpperCase();
+      if (moduleFilter && mod !== moduleFilter) return false;
       return true;
     });
   }, [apis, metricsOnly, moduleFilter]);
+
+  const filteredMetricsCount = useMemo(
+    () => filteredApis.filter((a) => a.collect_metrics === "true").length,
+    [filteredApis],
+  );
 
   const canConnect = useMemo(
     () => Boolean(host.trim() && username.trim() && password),
@@ -763,7 +783,7 @@ export default function App() {
       <section className="card">
         <h2>API endpoints ({filteredApis.length})</h2>
         <p className="muted">
-          Catalog from <code>data/bigip_apis.csv</code> (84 iControl REST paths). Select endpoints
+          Catalog from <code>data/bigip_apis.csv</code> ({apis.length} iControl REST paths). Select endpoints
           to poll; stats paths are recommended for metrics.
         </p>
         <div className="row">
@@ -779,14 +799,22 @@ export default function App() {
             <label>Module filter</label>
             <select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)}>
               <option value="">All modules</option>
-              {modules.map((m) => (
-                <option key={m} value={m}>
-                  {m}
+              {moduleFilterOptions.map(({ mod, total }) => (
+                <option key={mod} value={mod}>
+                  {mod} ({total})
                 </option>
               ))}
             </select>
           </div>
         </div>
+        {moduleFilter ? (
+          <p className="muted">
+            Showing {filteredApis.length} path(s) for module <code>{moduleFilter}</code>
+            {metricsOnly
+              ? ` (${filteredMetricsCount} metrics-oriented)`
+              : ` (${filteredMetricsCount} with collect_metrics enabled)`}
+          </p>
+        ) : null}
         <div className="actions">
           <button
             type="button"

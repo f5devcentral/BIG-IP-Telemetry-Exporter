@@ -119,12 +119,12 @@ Credentials stay in the API process memory (not written to disk by default). Res
 
 ### 2. Select API endpoints
 
-The catalog comes from [`data/bigip_apis.csv`](data/bigip_apis.csv) (84 paths; 33 metrics-oriented by default).
+The catalog comes from [`data/bigip_apis.csv`](data/bigip_apis.csv) (104 paths; 38 metrics-oriented by default, including ASM event sources and AFM firewall stats).
 
 | Control | Purpose |
 |---------|---------|
 | **Metrics / stats endpoints only** | Filters to rows marked `collect_metrics=true` |
-| **Module filter** | LTM, ASM, DNS, etc. |
+| **Module filter** | Filters by the CSV `module` column (e.g. **ASM** for `/mgmt/tm/asm/*`, **AFM** for `/mgmt/tm/security/firewall/*`, **SECURITY** for other `/mgmt/tm/security/*`) |
 | **Select all visible / Clear** | Bulk selection |
 | Per-row checkbox | Individual `/mgmt/...` paths |
 
@@ -599,7 +599,7 @@ The UI builds Prometheus/collector links from the browser hostname you use (or s
 
 ## API catalog
 
-Endpoints are defined in [`data/bigip_apis.csv`](data/bigip_apis.csv) (84 iControl REST paths; 33 stats/metrics-oriented by default).
+Endpoints are defined in [`data/bigip_apis.csv`](data/bigip_apis.csv) (104 iControl REST paths; 38 stats/metrics-oriented by default).
 
 ## Collector exporters (UI)
 

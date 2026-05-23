@@ -35,16 +35,36 @@ category,endpoint,description,status,module,notes,collect_metrics
 ,/mgmt/tm/ltm/profile/dns,DNS profile configuration,IMPLEMENTED,LTM,DNS protocol settings LTM Profiles,false
 ,/mgmt/tm/ltm/profile/dns/stats,DNS profile statistics,IMPLEMENTED,LTM,DNS performance metrics Security Module,true
 ,/mgmt/tm/security/shared-objects/address-list,Security address lists,IMPLEMENTED,SECURITY,IP address groupings Security Module,false
-,/mgmt/tm/security/firewall/policy,Network firewall policies,IMPLEMENTED,SECURITY,Firewall policy configuration Security Module,false
-,/mgmt/tm/security/firewall/policy/stats,Firewall policy statistics,IMPLEMENTED,SECURITY,Firewall performance metrics Security Module,true
-,/mgmt/tm/security/firewall/rule-stat/stats,Firewall rule statistics,IMPLEMENTED,SECURITY,Rule hit statistics Security Module,true
+AFM Module,/mgmt/tm/security/firewall/address-list,AFM firewall address lists,IMPLEMENTED,AFM,Address list collection AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/address-list/~partition~name,AFM firewall address list instance,IMPLEMENTED,AFM,Replace ~partition~name with partition and object name AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/port-list,AFM firewall port lists,IMPLEMENTED,AFM,Port list collection AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/port-list/~partition~name,AFM firewall port list instance,IMPLEMENTED,AFM,Replace ~partition~name with partition and object name AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/rule-list,AFM firewall rule lists,IMPLEMENTED,AFM,Rule list collection AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/rule-list/~partition~name,AFM firewall rule list instance,IMPLEMENTED,AFM,Replace ~partition~name with partition and object name AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/rule-list/~partition~name/rules,AFM firewall rules in rule list,IMPLEMENTED,AFM,Rules under a rule list AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/policy,AFM firewall policies,IMPLEMENTED,AFM,Firewall policy collection AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/policy/~partition~name,AFM firewall policy instance,IMPLEMENTED,AFM,Replace ~partition~name with partition and object name AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/policy/stats,AFM firewall policy statistics,IMPLEMENTED,AFM,Firewall policy performance metrics AFM Module,true
+AFM Module,/mgmt/tm/security/firewall/global-rules,AFM global firewall rules,IMPLEMENTED,AFM,Global firewall rules AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/global-fqdn-policy,AFM global FQDN firewall policy,IMPLEMENTED,AFM,Global FQDN policy AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/rule-stat,AFM firewall rule statistics collection,IMPLEMENTED,AFM,Rule statistics collection AFM Module,false
+AFM Module,/mgmt/tm/security/firewall/rule-stat/stats,AFM firewall rule hit statistics,IMPLEMENTED,AFM,Rule hit statistics AFM Module,true
 ,/mgmt/tm/security/ip-intelligence/policy,IP intelligence policies,IMPLEMENTED,SECURITY,IP reputation policies Security Module,false
 ,/mgmt/tm/security/nat/policy,NAT security policies,IMPLEMENTED,SECURITY,NAT policy configuration Security Module,false
 ,/mgmt/tm/security/bot-defense,Bot defense configuration,IMPLEMENTED,SECURITY,Bot protection settings Security Module,false
 ,/mgmt/tm/security/dos/profile,DoS protection profiles,IMPLEMENTED,SECURITY,DoS protection configuration Security Module,false
 ,/mgmt/tm/security/dos/device-config/stats,DoS protection statistics,IMPLEMENTED,SECURITY,DoS protection metrics Security Module,true
-,/mgmt/tm/asm/policies,ASM security policies,IMPLEMENTED,SECURITY,Application security policies Security Module,false
-,/mgmt/tm/asm/events,ASM security events,IMPLEMENTED,SECURITY,Security incident tracking Security Module,false
+ASM Module,/mgmt/tm/asm/policies,ASM policies collection,IMPLEMENTED,ASM,Top-level security policy collection ASM Module,false
+ASM Module,/mgmt/tm/asm/policies/{policyId},ASM policy instance,IMPLEMENTED,ASM,Replace policyId with name or ID from policies collection ASM Module,false
+ASM Module,/mgmt/tm/asm/requests,ASM requests collection,IMPLEMENTED,ASM,Top-level ASM requests collection ASM Module,false
+ASM Module,/mgmt/tm/asm/events,ASM events collection,IMPLEMENTED,ASM,Top-level ASM events collection ASM Module,false
+ASM Module,/mgmt/tm/asm/signatures,ASM signatures collection,IMPLEMENTED,ASM,Attack signature definitions ASM Module,false
+ASM Module,/mgmt/tm/asm/signature-sets,ASM signature sets collection,IMPLEMENTED,ASM,Signature set groupings ASM Module,false
+ASM Module,/mgmt/tm/asm/events/requests,ASM request events,IMPLEMENTED,ASM,Runtime request event metrics source ASM Module,true
+ASM Module,/mgmt/tm/asm/events/incidents,ASM security incidents,IMPLEMENTED,ASM,Runtime incident event metrics source ASM Module,true
+ASM Module,/mgmt/tm/asm/events/brute-force-attacks,ASM brute-force attack events,IMPLEMENTED,ASM,Runtime brute-force event metrics source ASM Module,true
+ASM Module,/mgmt/tm/asm/events/bot-incidents,ASM bot incidents,IMPLEMENTED,ASM,Runtime bot incident metrics source ASM Module,true
+ASM Module,/mgmt/tm/asm/events/bot-defense-events,ASM bot defense events,IMPLEMENTED,ASM,Runtime bot defense event metrics source ASM Module,true
 ,/mgmt/tm/api-protection/profile/apiprotection,API protection policies,IMPLEMENTED,API_PROTECTION,API security configuration Security Module,false
 ,/mgmt/tm/api-protection/profile/apiprotection/stats,API protection statistics,IMPLEMENTED,API_PROTECTION,API protection metrics System Management,true
 ,/mgmt/tm/sys/file/ssl-cert,SSL certificate management,IMPLEMENTED,SYS,Certificate lifecycle System Management,false

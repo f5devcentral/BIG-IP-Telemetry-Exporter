@@ -58,7 +58,7 @@ Credentials are held in the API process memory for active sessions. They are not
 The catalog is loaded from `data/bigip_apis.csv`.
 
 - Enable **Metrics / stats endpoints only** for recommended paths.
-- Use **Module filter** to narrow by LTM, DNS, etc.
+- Use **Module filter** to narrow by the catalog `module` value (e.g. **AFM** for `/mgmt/tm/security/firewall/*`, **ASM** for `/mgmt/tm/asm/*`, **SECURITY** for other security paths).
 - Use **Select all visible** or per-row checkboxes.
 
 Stats endpoints (paths containing `/stats`) typically expose counters and gauges suitable for export.
