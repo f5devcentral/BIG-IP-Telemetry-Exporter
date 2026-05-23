@@ -55,7 +55,6 @@ AFM Module,/mgmt/tm/security/firewall/rule-stat/stats,AFM firewall rule hit stat
 ,/mgmt/tm/security/dos/profile,DoS protection profiles,IMPLEMENTED,SECURITY,DoS protection configuration Security Module,false
 ,/mgmt/tm/security/dos/device-config/stats,DoS protection statistics,IMPLEMENTED,SECURITY,DoS protection metrics Security Module,true
 ASM Module,/mgmt/tm/asm/policies,ASM policies collection,IMPLEMENTED,ASM,Top-level security policy collection ASM Module,false
-ASM Module,/mgmt/tm/asm/policies/{policyId},ASM policy instance,IMPLEMENTED,ASM,Replace policyId with name or ID from policies collection ASM Module,false
 ASM Module,/mgmt/tm/asm/requests,ASM requests collection,IMPLEMENTED,ASM,Top-level ASM requests collection ASM Module,false
 ASM Module,/mgmt/tm/asm/events,ASM events collection,IMPLEMENTED,ASM,Top-level ASM events collection ASM Module,false
 ASM Module,/mgmt/tm/asm/signatures,ASM signatures collection,IMPLEMENTED,ASM,Attack signature definitions ASM Module,false
