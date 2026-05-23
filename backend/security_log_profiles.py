@@ -5,8 +5,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from backend.bigip_client import BigIPClient
-from backend.bigip_resource import ensure_config_object
+from backend.bigip_client import BigIPClient, BigIPError
+from backend.bigip_resource import (
+    ensure_config_object,
+    find_collection_item,
+    is_invalid_path,
+    path_from_self_link,
+)
 from backend.module_provision import is_module_provisioned
 
 # Re-export for tests and documentation.
@@ -73,8 +78,12 @@ def _security_log_profile_path(partition: str, name: str) -> str:
     return f"{SECURITY_LOG_PROFILE_COLLECTION}/~{partition}~{name}"
 
 
-def _asm_log_profile_path(partition: str, name: str) -> str:
-    return f"{ASM_LOG_PROFILE_COLLECTION}/~{partition}~{name}"
+def _asm_log_profile_path_candidates(partition: str, name: str) -> list[str]:
+    """ASM logging-profiles may not support ~Partition~name GET; try common URI forms."""
+    return [
+        f"{ASM_LOG_PROFILE_COLLECTION}/{name}",
+        f"{ASM_LOG_PROFILE_COLLECTION}/~{partition}~{name}",
+    ]
 
 
 def _asm_auto_create() -> bool:
@@ -147,6 +156,41 @@ def _afm_patch_settings() -> dict:
     }
 
 
+def _patch_asm_logging_profile(
+    client: BigIPClient,
+    *,
+    partition: str,
+    name: str,
+    existing: dict | None,
+) -> str:
+    """PATCH an existing ASM logging profile; return the REST path that worked."""
+    patch_body = _asm_patch_settings()
+    candidates: list[str] = []
+    if existing:
+        link_path = path_from_self_link(str(existing.get("selfLink", "")))
+        if link_path:
+            candidates.append(link_path)
+    candidates.extend(_asm_log_profile_path_candidates(partition, name))
+
+    seen: set[str] = set()
+    last_exc: BigIPError | None = None
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            client.patch(path, json_body=patch_body)
+            return path
+        except BigIPError as exc:
+            last_exc = exc
+            if is_invalid_path(exc):
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise BigIPError("No valid ASM logging profile path for PATCH")
+
+
 def ensure_asm_log_profile(
     client: BigIPClient,
     *,
@@ -159,25 +203,62 @@ def ensure_asm_log_profile(
     part = partition or _partition()
     prof = name or _asm_name()
     full = _full_name(part, prof)
-    path = _asm_log_profile_path(part, prof)
+    display_path = f"{ASM_LOG_PROFILE_COLLECTION}/{prof}"
     if not _asm_auto_create():
         return SecurityLogProfileResult(
             full_name=full,
-            instance_path=path,
+            instance_path=display_path,
             created=False,
             module="ASM",
         )
 
-    created = ensure_config_object(
-        client,
-        collection_path=ASM_LOG_PROFILE_COLLECTION,
-        instance_path=path,
-        create_body=_asm_profile_settings(partition=part, name=prof),
-        patch_body=_asm_patch_settings(),
-    )
-    return SecurityLogProfileResult(
-        full_name=full, instance_path=path, created=created, module="ASM"
-    )
+    create_body = _asm_profile_settings(partition=part, name=prof)
+    existing: dict | None = None
+    try:
+        existing = find_collection_item(
+            client,
+            ASM_LOG_PROFILE_COLLECTION,
+            name=prof,
+            partition=part,
+        )
+    except BigIPError as exc:
+        if not is_invalid_path(exc):
+            raise
+
+    if existing:
+        path = _patch_asm_logging_profile(
+            client, partition=part, name=prof, existing=existing
+        )
+        return SecurityLogProfileResult(
+            full_name=full, instance_path=path, created=False, module="ASM"
+        )
+
+    try:
+        client.post(ASM_LOG_PROFILE_COLLECTION, json_body=create_body)
+        return SecurityLogProfileResult(
+            full_name=full,
+            instance_path=display_path,
+            created=True,
+            module="ASM",
+        )
+    except BigIPError as post_exc:
+        try:
+            existing = find_collection_item(
+                client,
+                ASM_LOG_PROFILE_COLLECTION,
+                name=prof,
+                partition=part,
+            )
+        except BigIPError:
+            raise post_exc from None
+        if not existing:
+            raise post_exc from None
+        path = _patch_asm_logging_profile(
+            client, partition=part, name=prof, existing=existing
+        )
+        return SecurityLogProfileResult(
+            full_name=full, instance_path=path, created=False, module="ASM"
+        )
 
 
 def ensure_afm_log_profile(
