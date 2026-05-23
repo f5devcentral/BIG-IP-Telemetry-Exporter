@@ -701,14 +701,6 @@ def _register_ui_routes() -> None:
             name="ui-assets",
         )
 
-    favicon_svg = FRONTEND_DIST / "favicon.svg"
-
-    @app.get("/favicon.svg", include_in_schema=False, response_model=None)
-    def ui_favicon() -> FileResponse:
-        if not favicon_svg.is_file():
-            raise HTTPException(status_code=404, detail="Not Found")
-        return FileResponse(favicon_svg, media_type="image/svg+xml")
-
     @app.get("/{ui_path:path}", include_in_schema=False, response_model=None)
     def ui_fallback(ui_path: str) -> FileResponse | HTMLResponse:
         if ui_path.startswith("api/") or ui_path == "api":
