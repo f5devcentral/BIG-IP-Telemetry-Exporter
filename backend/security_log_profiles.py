@@ -6,13 +6,9 @@ import os
 from dataclasses import dataclass
 
 from backend.bigip_client import BigIPClient
-from backend.bigip_resource import ensure_config_object
+from backend.bigip_resource import ensure_config_object, is_not_found
 from backend.module_provision import is_module_provisioned
-from backend.log_templates import (
-    AFM_NETWORK_EVENT_TEMPLATE,
-    REQUEST_EVENT_TEMPLATE,
-    RESPONSE_EVENT_TEMPLATE,
-)
+from backend.log_templates import AFM_NETWORK_EVENT_TEMPLATE, REQUEST_EVENT_TEMPLATE
 
 # Re-export for tests and documentation.
 __all__ = [
@@ -80,6 +76,7 @@ def _afm_auto_create() -> bool:
 
 
 def _asm_application_body() -> dict:
+    """Application sub-profile body (format/filter are structures, not JSON arrays)."""
     return {
         "name": "application",
         "localStorage": "enabled",
@@ -87,87 +84,76 @@ def _asm_application_body() -> dict:
         "guaranteeResponseLogging": "enabled",
         "responseLogging": "all",
         "logicOperation": "or",
-        "filter": [
-            {
-                "name": "request-type",
-                "values": ["all"],
-            },
-        ],
-        "format": [
-            {
-                "name": "request-format",
-                "type": "user-defined",
-                "userString": REQUEST_EVENT_TEMPLATE,
-            },
-            {
-                "name": "response-format",
-                "type": "user-defined",
-                "userString": RESPONSE_EVENT_TEMPLATE,
-            },
-        ],
-    }
-
-
-def _asm_profile_settings(*, partition: str, name: str) -> dict:
-    return {
-        "name": name,
-        "partition": partition,
-        "description": ASM_DESCRIPTION,
-        "application": [_asm_application_body()],
-    }
-
-
-def _asm_patch_settings() -> dict:
-    return {
-        "description": ASM_DESCRIPTION,
-        "application": [_asm_application_body()],
-    }
-
-
-def _afm_network_filter() -> dict:
-    return {
-        "name": "filter",
-        "logAclMatchAccept": "enabled",
-        "logAclMatchDrop": "enabled",
-        "logAclMatchReject": "enabled",
-        "logAclToBoxDeny": "enabled",
-        "logGeoAlways": "enabled",
-        "logIpErrors": "enabled",
-        "logTcpErrors": "enabled",
-        "logTcpEvents": "enabled",
-        "logTranslationFields": "enabled",
-        "logUserAlways": "enabled",
+        "filter": {
+            "name": "request-type",
+            "values": ["all"],
+        },
+        "format": {
+            "type": "user-defined",
+            "userString": REQUEST_EVENT_TEMPLATE,
+        },
     }
 
 
 def _afm_network_body() -> dict:
+    """Network sub-profile body (filter/format are structures on BIG-IP)."""
     return {
         "name": "network",
-        "filter": [_afm_network_filter()],
-        "format": [
-            {
-                "name": "format",
-                "type": "user-defined",
-                "userDefined": AFM_NETWORK_EVENT_TEMPLATE,
-            },
-        ],
+        "filter": {
+            "logAclMatchAccept": "enabled",
+            "logAclMatchDrop": "enabled",
+            "logAclMatchReject": "enabled",
+            "logAclToBoxDeny": "enabled",
+            "logGeoAlways": "enabled",
+            "logIpErrors": "enabled",
+            "logTcpErrors": "enabled",
+            "logTcpEvents": "enabled",
+            "logTranslationFields": "enabled",
+            "logUserAlways": "enabled",
+        },
+        "format": {
+            "type": "user-defined",
+            "userDefined": AFM_NETWORK_EVENT_TEMPLATE,
+        },
     }
 
 
-def _afm_profile_settings(*, partition: str, name: str) -> dict:
-    return {
-        "name": name,
-        "partition": partition,
-        "description": AFM_DESCRIPTION,
-        "network": [_afm_network_body()],
-    }
+def _profile_shell(*, partition: str, name: str, description: str) -> dict:
+    return {"name": name, "partition": partition, "description": description}
 
 
-def _afm_patch_settings() -> dict:
-    return {
-        "description": AFM_DESCRIPTION,
-        "network": [_afm_network_body()],
-    }
+def _ensure_log_profile_subcollection(
+    client: BigIPClient,
+    *,
+    partition: str,
+    name: str,
+    description: str,
+    subcollection: str,
+    sub_body: dict[str, object],
+) -> bool:
+    """Create log profile shell, then configure application or network sub-profile."""
+    path = _instance_path(partition, name)
+    shell = _profile_shell(partition=partition, name=name, description=description)
+    created = ensure_config_object(
+        client,
+        collection_path=PROFILE_COLLECTION,
+        instance_path=path,
+        create_body=shell,
+        patch_body={"description": description},
+    )
+
+    sub_instance = f"{path}/{subcollection}/{subcollection}"
+    sub_collection = f"{path}/{subcollection}"
+    try:
+        client.get(sub_instance)
+    except BigIPError as exc:
+        if not is_not_found(exc):
+            raise
+        client.post(sub_collection, json_body=sub_body)
+        return created
+
+    client.patch(sub_instance, json_body=sub_body)
+    return created
 
 
 def ensure_asm_log_profile(
@@ -188,12 +174,13 @@ def ensure_asm_log_profile(
             full_name=full, instance_path=path, created=False, module="ASM"
         )
 
-    created = ensure_config_object(
+    created = _ensure_log_profile_subcollection(
         client,
-        collection_path=PROFILE_COLLECTION,
-        instance_path=path,
-        create_body=_asm_profile_settings(partition=part, name=prof),
-        patch_body=_asm_patch_settings(),
+        partition=part,
+        name=prof,
+        description=ASM_DESCRIPTION,
+        subcollection="application",
+        sub_body=_asm_application_body(),
     )
     return SecurityLogProfileResult(
         full_name=full, instance_path=path, created=created, module="ASM"
@@ -218,12 +205,13 @@ def ensure_afm_log_profile(
             full_name=full, instance_path=path, created=False, module="AFM"
         )
 
-    created = ensure_config_object(
+    created = _ensure_log_profile_subcollection(
         client,
-        collection_path=PROFILE_COLLECTION,
-        instance_path=path,
-        create_body=_afm_profile_settings(partition=part, name=prof),
-        patch_body=_afm_patch_settings(),
+        partition=part,
+        name=prof,
+        description=AFM_DESCRIPTION,
+        subcollection="network",
+        sub_body=_afm_network_body(),
     )
     return SecurityLogProfileResult(
         full_name=full, instance_path=path, created=created, module="AFM"
