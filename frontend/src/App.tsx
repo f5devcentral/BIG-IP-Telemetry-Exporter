@@ -705,10 +705,7 @@ export default function App() {
         <h2>BIG-IP connections ({devices.length} connected)</h2>
         <p className="muted">
           Connect one or more management addresses. Metrics are tagged per device (
-          <code>bigip.host</code>). Reconnecting the same host replaces the previous session. Each
-          connect deploys an AS3 declaration with local logging and AVR analytics profiles (LTM
-          request-log, ASM/AFM security log, HTTP/TCP analytics). Attach them on virtual servers;
-          OTLP log shipping is planned for a later release.
+          <code>bigip.host</code>). Reconnecting the same host replaces the previous session.
         </p>
         <h3 className="subsection-title">Currently connected</h3>
         {devices.length === 0 ? (
