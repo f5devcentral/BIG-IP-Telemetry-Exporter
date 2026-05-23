@@ -222,7 +222,7 @@ def build_log_profiles_declaration(
         "class": "ADC",
         "schemaVersion": schema_version_for_declaration(client),
         "id": _declaration_id(),
-        "remark": "BIG-IP Metrics Exporter — logging and AVR analytics profiles (local)",
+        "remark": "BIG-IP Metrics Exporter log and AVR profiles",
         tenant_name: {
             "class": "Tenant",
             _application(): {
