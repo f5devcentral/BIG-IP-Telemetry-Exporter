@@ -368,8 +368,9 @@ def connect(body: ConnectBody) -> ConnectResponse:
         asm_log_profile_created: bool | None = None
         try:
             asm_result = ensure_asm_log_profile(client)
-            asm_log_profile = asm_result.full_name
-            asm_log_profile_created = asm_result.created
+            if asm_result is not None:
+                asm_log_profile = asm_result.full_name
+                asm_log_profile_created = asm_result.created
         except BigIPError as exc:
             warning = _append_warning(
                 warning,
@@ -381,8 +382,9 @@ def connect(body: ConnectBody) -> ConnectResponse:
         afm_log_profile_created: bool | None = None
         try:
             afm_result = ensure_afm_log_profile(client)
-            afm_log_profile = afm_result.full_name
-            afm_log_profile_created = afm_result.created
+            if afm_result is not None:
+                afm_log_profile = afm_result.full_name
+                afm_log_profile_created = afm_result.created
         except BigIPError as exc:
             warning = _append_warning(
                 warning,

@@ -119,7 +119,7 @@ Each connected device appears in a list with:
   - **ASM** `/Common/bigip-metrics-asm-log` — Security Log Profile with storage filter **request-type all** and response logging **all**
   - **AFM** `/Common/bigip-metrics-afm-log` — Security Log Profile with all network firewall log categories enabled
 
-Attach LTM profile as **Request Logging**; attach ASM/AFM profiles as **Log Profile** on the virtual server. OTLP log forwarding will be added in a later release.
+Attach LTM profile as **Request Logging**; attach ASM/AFM profiles as **Log Profile** on the virtual server. ASM and AFM profiles are created only when the corresponding module is provisioned on the device (level not `none` in `/mgmt/tm/sys/provision`). OTLP log forwarding will be added in a later release.
 
 Credentials stay in the API process memory (not written to disk by default). Restarting the backend clears all sessions.
 

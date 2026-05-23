@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from backend.bigip_client import BigIPClient
 from backend.bigip_resource import ensure_config_object
+from backend.module_provision import is_module_provisioned
 from backend.log_templates import (
     AFM_NETWORK_EVENT_TEMPLATE,
     REQUEST_EVENT_TEMPLATE,
@@ -174,8 +175,10 @@ def ensure_asm_log_profile(
     *,
     partition: str | None = None,
     name: str | None = None,
-) -> SecurityLogProfileResult:
+) -> SecurityLogProfileResult | None:
     """ASM security log profile with storage filter request-type all."""
+    if not is_module_provisioned(client, "asm"):
+        return None
     part = partition or _partition()
     prof = name or _asm_name()
     path = _instance_path(part, prof)
@@ -202,8 +205,10 @@ def ensure_afm_log_profile(
     *,
     partition: str | None = None,
     name: str | None = None,
-) -> SecurityLogProfileResult:
+) -> SecurityLogProfileResult | None:
     """AFM network security log profile with all network firewall log categories enabled."""
+    if not is_module_provisioned(client, "afm"):
+        return None
     part = partition or _partition()
     prof = name or _afm_name()
     path = _instance_path(part, prof)

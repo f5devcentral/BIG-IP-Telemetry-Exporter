@@ -56,6 +56,8 @@ On connect, the exporter creates or updates three logging profiles:
 | ASM security log | `/Common/bigip-metrics-asm-log` | **Log Profile** (Application Security) | Storage filter **request-type all**, `responseLogging` **all**, structured request/response formats |
 | AFM security log | `/Common/bigip-metrics-afm-log` | **Log Profile** (Network Firewall) | All ACL/TCP/IP/geo network log categories enabled |
 
+ASM and AFM profiles are skipped when that module is not provisioned on the BIG-IP (no connect warning).
+
 Shipping logs to the OpenTelemetry collector is planned for a later release.
 
 Reconnecting the same management IP **replaces** the existing session for that host.
