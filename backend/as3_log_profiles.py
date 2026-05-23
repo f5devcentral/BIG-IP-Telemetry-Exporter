@@ -13,7 +13,8 @@ from backend.module_provision import is_module_provisioned
 
 DEFAULT_PARTITION = "Common"
 DEFAULT_TENANT = "Common"
-DEFAULT_APPLICATION = "bigip_metrics_exporter"
+# AS3 Common tenant only allows a child application named "Shared".
+DEFAULT_APPLICATION = "Shared"
 DEFAULT_DECLARATION_ID = "bigip_metrics_exporter_log_profiles"
 
 DEFAULT_REQUEST_LOG_NAME = "bigip-metrics-requestlog"
@@ -46,8 +47,11 @@ def _tenant() -> str:
     return os.environ.get("BIGIP_AS3_TENANT", DEFAULT_TENANT).strip() or DEFAULT_TENANT
 
 
-def _application() -> str:
-    return os.environ.get("BIGIP_AS3_APPLICATION", DEFAULT_APPLICATION).strip()
+def _application_key(tenant_name: str) -> str:
+    """Return the Application key under a tenant (Common requires Shared)."""
+    if tenant_name == "Common":
+        return "Shared"
+    return os.environ.get("BIGIP_AS3_APPLICATION", "bigip_metrics_exporter").strip()
 
 
 def _declaration_id() -> str:
@@ -218,6 +222,7 @@ def build_log_profiles_declaration(
         app_objects[_tcp_analytics_name()] = _tcp_analytics_profile()
 
     tenant_name = _tenant()
+    app_key = _application_key(tenant_name)
     return {
         "class": "ADC",
         "schemaVersion": schema_version_for_declaration(client),
@@ -225,7 +230,7 @@ def build_log_profiles_declaration(
         "remark": "BIG-IP Metrics Exporter log and AVR profiles",
         tenant_name: {
             "class": "Tenant",
-            _application(): {
+            app_key: {
                 "class": "Application",
                 "template": "shared",
                 **app_objects,
