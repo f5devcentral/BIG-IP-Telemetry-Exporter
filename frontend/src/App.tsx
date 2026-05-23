@@ -270,8 +270,10 @@ export default function App() {
       });
       const data = await readJson<{ session_id: string; warning?: string }>(r);
       setConnectWarning(data.warning ?? null);
-      setPassword("");
+      setHost("");
       setDeviceLabel("");
+      setUsername("");
+      setPassword("");
       await refreshDevices();
       setExportDeviceIds((prev) => new Set(prev).add(data.session_id));
     } catch (e) {
