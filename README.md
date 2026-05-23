@@ -206,6 +206,7 @@ On Ubuntu, restart uses the same recreate path as reload wipe. On Kubernetes, th
 | Sessions | One session per device; list via `GET /api/bigips` |
 | Metric identity | OTLP instruments keyed per `bigip.host` so values do not overwrite across devices |
 | Attributes (Prometheus labels) | `bigip_host` (device), `bigip_stat` (counter name, e.g. `memoryfree`), `bigip_object` (short stats object path) |
+| Excluded objects | Metrics whose `bigip_object` contains `fiveminavg`, `fivesecavg`, or `oneminavge` / `oneminavg` are dropped (override: `BIGIP_EXCLUDE_OBJECT_PATTERNS`) |
 | Export scope | Only devices checked in the connections list (unless using API with explicit `session_ids`) |
 | Network | Each device must be reachable from the host/pod running the Python backend |
 
@@ -628,6 +629,7 @@ Catalog API: `GET /api/exporters/catalog` (categories, field schemas, links to [
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `BIGIP_EXCLUDE_OBJECT_PATTERNS` | `fiveminavg,fivesecavg,oneminavge,oneminavg` | Comma-separated substrings; if `bigip_object` contains any, the metric is skipped |
 | `PORT` | `8001` (local), `8000` (Docker/K8s image) | API listen port |
 | `OTLP_HTTP_ENDPOINT` | `http://127.0.0.1:4318` | Default OTLP URL in UI (K8s manifest overrides) |
 | `PROMETHEUS_RELOAD_WIPE_TSDB` | `true` | When true, **Reload Prometheus** wipes TSDB before `/-/reload` |

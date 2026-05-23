@@ -150,6 +150,8 @@ Empty `session_ids` exports **all** connected devices. To target specific device
    | `bigip_stat` | Stat field name (`memoryfree`, `clientside.bitsIn`, …) |
    | `bigip_object` | Short stats object slot (e.g. `memory_host_0`) |
 
+Metrics are **not** exported when `bigip_object` contains `fiveminavg`, `fivesecavg`, or `oneminavge` / `oneminavg` (rolling averages). Override with env `BIGIP_EXCLUDE_OBJECT_PATTERNS` (comma-separated substrings).
+
    ```promql
    bigip_tm_sys_memory{bigip_host="10.0.0.50", bigip_stat="memoryused"}
    sum by (bigip_host, bigip_stat) (bigip_tm_sys_memory)

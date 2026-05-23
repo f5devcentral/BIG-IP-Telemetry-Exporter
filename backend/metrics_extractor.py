@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Iterator
 
 # BIG-IP nestedStats entry keys are often full selfLink URLs — avoid using them in metric names.
 _URLISH = re.compile(r"^https?://|^https_", re.I)
+
+# Skip rolling-average object paths (substring match on bigip.object, case-insensitive).
+_DEFAULT_EXCLUDED_OBJECT_SUBSTRINGS: tuple[str, ...] = (
+    "fiveminavg",
+    "fivesecavg",
+    "oneminavge",  # common BIG-IP / typo variant
+    "oneminavg",
+)
+
+
+def _excluded_object_substrings() -> tuple[str, ...]:
+    raw = os.environ.get("BIGIP_EXCLUDE_OBJECT_PATTERNS", "").strip()
+    if raw:
+        return tuple(p.strip().lower() for p in raw.split(",") if p.strip())
+    return _DEFAULT_EXCLUDED_OBJECT_SUBSTRINGS
+
+
+def is_excluded_bigip_object(object_label: str) -> bool:
+    """True if this bigip.object value should not be exported."""
+    label = object_label.lower()
+    return any(sub in label for sub in _excluded_object_substrings())
 
 
 def _sanitize_name(part: str) -> str:
@@ -77,12 +99,15 @@ def _walk_nested_stats(
             if key in ("kind", "selfLink", "generation", "description", "isSubcollection"):
                 continue
             if isinstance(val, (int, float)) and not isinstance(val, bool):
+                object_label = _compact_object_label(object_path)
+                if is_excluded_bigip_object(object_label):
+                    continue
                 stat = _sanitize_name(str(key))
                 metric_name = endpoint_metric_prefix(endpoint)
                 attrs = {
                     "bigip.host": bigip_host,
                     "bigip.stat": stat,
-                    "bigip.object": _compact_object_label(object_path),
+                    "bigip.object": object_label,
                 }
                 yield metric_name, float(val), attrs
             elif isinstance(val, dict):
