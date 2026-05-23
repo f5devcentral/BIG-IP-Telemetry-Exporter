@@ -625,31 +625,29 @@ export default function App() {
         </div>
       )}
 
-      <section className="connected-status-bar" aria-live="polite">
-        <div className="connected-status-summary">
-          <span
-            className={`connected-badge ${devices.length > 0 ? "connected-badge-active" : ""}`}
-            aria-label={connectedCountLabel(devices.length)}
-          >
-            {devices.length}
-          </span>
-          <div className="connected-status-text">
-            <strong>{connectedCountLabel(devices.length)}</strong>
-            {devices.length > 0 && (
+      {devices.length > 0 && (
+        <section className="connected-status-bar" aria-live="polite">
+          <div className="connected-status-summary">
+            <span
+              className="connected-badge connected-badge-active"
+              aria-label={connectedCountLabel(devices.length)}
+            >
+              {devices.length}
+            </span>
+            <div className="connected-status-text">
+              <strong>{connectedCountLabel(devices.length)}</strong>
               <span className="muted connected-status-sub">
                 {exportSelectedDevices.length} selected for export
               </span>
-            )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => void refreshDevices()}
+            >
+              Refresh list
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => void refreshDevices()}
-          >
-            Refresh list
-          </button>
-        </div>
-        {devices.length > 0 ? (
           <ul className="connected-chips" aria-label="Connected BIG-IP devices">
             {devices.map((d) => (
               <li key={d.session_id} className="connected-chip">
@@ -663,12 +661,8 @@ export default function App() {
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="muted connected-status-empty">
-            Connect a management IP below to add your first BIG-IP.
-          </p>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="card">
         <h2>BIG-IP connections ({devices.length} connected)</h2>

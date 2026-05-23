@@ -438,11 +438,6 @@ a:hover {
   font-size: 0.85rem;
 }
 
-.connected-status-empty {
-  margin: 0.75rem 0 0;
-  font-size: 0.9rem;
-}
-
 .connected-chips {
   list-style: none;
   margin: 0.75rem 0 0;

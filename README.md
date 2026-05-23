@@ -83,7 +83,7 @@ flowchart TD
 
 | Area | What it shows |
 |------|----------------|
-| **Connected status bar** (top) | Count of connected BIG-IPs, a chip per device (label + management IP), how many are checked for export, **Refresh list**, and auto-refresh every 45 seconds |
+| **Connected status bar** (top, when ≥1 device) | Count, chip per device, export selection summary, **Refresh list**, auto-refresh every 45 seconds |
 | **BIG-IP connections** | Full device list with export checkboxes, **Remove**, and the connect form |
 | **Export to collector** | How many devices are selected (`X of Y connected`) |
 | **Prometheus validation** | Links, example queries, reload/restart controls |
@@ -107,7 +107,7 @@ Open the UI (`http://<HOST-IP>:8001` on Ubuntu, or port-forward on Kubernetes).
 - **Remove** — logs out and drops that session (`DELETE /api/session/{id}`).
 - Reconnecting the **same host** replaces the previous session for that IP.
 
-The page always shows how many BIG-IPs are connected (status bar and section title). With zero devices, the status bar reads **No BIG-IPs connected** and the list shows an empty-state message.
+The **BIG-IP connections** card shows the count in its title and lists devices when connected. The top status bar appears only after the first device is connected.
 
 Each connected device appears in a list with:
 

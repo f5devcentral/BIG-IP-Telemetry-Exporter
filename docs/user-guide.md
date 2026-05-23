@@ -14,7 +14,7 @@ After upgrading the repo, rebuild the UI when not using Vite dev mode: `cd front
 
 | Area | Purpose |
 |------|---------|
-| **Connected status bar** | Live count, chip per connected BIG-IP, export selection summary, **Refresh list** (also auto-refreshes every 45s) |
+| **Connected status bar** | Shown when at least one device is connected: count, chips, **Refresh list** (auto-refreshes every 45s) |
 | **BIG-IP connections** | Manage sessions, check devices for export, connect form |
 | **API endpoints** | iControl REST path catalog |
 | **Collector exporters** | OpenTelemetry Collector Contrib sinks |
@@ -37,7 +37,7 @@ After upgrading the repo, rebuild the UI when not using Vite dev mode: `cd front
 2. Click **Add BIG-IP** (same required fields).
 3. Repeat for each device you want to monitor.
 
-The **Connected status bar** at the top always shows how many BIG-IPs are connected and lists each one. The connections card title includes the count, e.g. **BIG-IP connections (2 connected)**.
+When devices are connected, the **Connected status bar** at the top lists each one. The connections card title includes the count, e.g. **BIG-IP connections (2 connected)**.
 
 ### Device list
 
