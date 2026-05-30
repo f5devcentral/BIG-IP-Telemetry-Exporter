@@ -67,7 +67,16 @@ def build_collector_config(
                     "grpc": {"endpoint": "0.0.0.0:4317"},
                     "http": {"endpoint": "0.0.0.0:4318"},
                 }
-            }
+            },
+            "tcplog": {
+                "listen_address": f"0.0.0.0:{os.environ.get('BIGIP_LOG_HSL_PORT', '5141')}",
+            },
+            "syslog": {
+                "tcp": {
+                    "listen_address": f"0.0.0.0:{os.environ.get('BIGIP_LOG_SYSLOG_PORT', '5140')}",
+                },
+                "protocol": "rfc5424",
+            },
         },
         "processors": {
             "batch": {"timeout": "5s", "send_batch_size": 512},
@@ -77,7 +86,10 @@ def build_collector_config(
                 "spike_limit_mib": 128,
             },
         },
-        "exporters": exporters,
+        "exporters": {
+            **exporters,
+            "debug/logs": {"verbosity": "basic"},
+        },
         "extensions": {"health_check": {"endpoint": "0.0.0.0:13133"}},
         "service": {
             "extensions": ["health_check"],
@@ -86,7 +98,12 @@ def build_collector_config(
                     "receivers": ["otlp"],
                     "processors": ["memory_limiter", "batch"],
                     "exporters": metric_exporters,
-                }
+                },
+                "logs": {
+                    "receivers": ["syslog", "tcplog"],
+                    "processors": ["memory_limiter", "batch"],
+                    "exporters": ["debug/logs"],
+                },
             },
             "telemetry": {
                 "logs": {"level": "info"},

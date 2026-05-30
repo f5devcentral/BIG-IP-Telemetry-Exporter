@@ -74,6 +74,8 @@ type BigIPDevice = {
   http_analytics_profile_created?: boolean | null;
   tcp_analytics_profile?: string | null;
   tcp_analytics_profile_created?: boolean | null;
+  log_syslog_target?: string | null;
+  log_hsl_target?: string | null;
   export_metrics?: boolean;
   export_logs?: boolean;
   connected_since?: number;
@@ -419,11 +421,15 @@ export default function App() {
       return;
     }
     const sessionIds = devices
-      .filter((d) => exportDeviceIds.has(d.session_id) && d.export_metrics !== false)
+      .filter(
+        (d) =>
+          exportDeviceIds.has(d.session_id) &&
+          (d.export_metrics !== false || d.export_logs !== false),
+      )
       .map((d) => d.session_id);
     if (sessionIds.length === 0) {
       setError(
-        "No checked devices have metrics export enabled. Connect with Export metrics or change selection.",
+        "No checked devices have metrics or log export enabled. Connect with Export metrics and/or Export logs.",
       );
       return;
     }
@@ -443,8 +449,16 @@ export default function App() {
           otlp_endpoint: otlpEndpoint,
         }),
       });
-      const data = await readJson<{ status: Record<string, unknown> }>(r);
-      setExportStatus(data.status);
+      const data = await readJson<{
+        status?: Record<string, unknown>;
+        log_forwarding?: Record<string, unknown>;
+        mode?: string;
+      }>(r);
+      setExportStatus({
+        ...(data.status ?? {}),
+        log_forwarding: data.log_forwarding,
+        mode: data.mode,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -477,9 +491,13 @@ export default function App() {
     const r = await apiFetch("/api/export/status");
     const data = await readJson<{
       loop: Record<string, unknown>;
+      log_forwarding?: Record<string, unknown>;
       connected_devices?: BigIPDevice[];
     }>(r);
-    setExportStatus(data.loop);
+    setExportStatus({
+      ...data.loop,
+      log_forwarding: data.log_forwarding,
+    });
     if (data.connected_devices?.length !== undefined) {
       setDevices(data.connected_devices);
     }
@@ -829,7 +847,7 @@ export default function App() {
               checked={connectExportLogs}
               onChange={(e) => setConnectExportLogs(e.target.checked)}
             />
-            Export logs (create logging profiles)
+            Export logs (remote syslog/HSL profiles)
           </label>
         </div>
         <label className="check">

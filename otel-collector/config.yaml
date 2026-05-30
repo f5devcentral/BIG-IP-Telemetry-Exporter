@@ -6,6 +6,12 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+  syslog:
+    tcp:
+      listen_address: 0.0.0.0:5140
+    protocol: rfc5424
+  tcplog:
+    listen_address: 0.0.0.0:5141
 
 processors:
   batch:
@@ -21,6 +27,8 @@ exporters:
     endpoint: 0.0.0.0:8889
     const_labels:
       source: bigip-metrics-exporter
+  debug/logs:
+    verbosity: basic
 
 extensions:
   health_check:
@@ -33,6 +41,10 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [prometheus/validation]
+    logs:
+      receivers: [syslog, tcplog]
+      processors: [memory_limiter, batch]
+      exporters: [debug/logs]
   telemetry:
     logs:
       level: info

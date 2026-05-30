@@ -32,6 +32,7 @@ from backend.collector_config import (
     list_exporter_catalog,
     write_collector_config,
 )
+from backend.log_forwarding import runtime_log_config, syslog_host
 from backend.metrics_extractor import extract_metrics
 from backend.otel_export import MetricsExportLoop, OTLPMetricsPusher
 from backend.prometheus_ops import control_status, reload_prometheus, restart_prometheus
@@ -85,6 +86,8 @@ class _Session:
     http_analytics_profile_created: bool | None = None
     tcp_analytics_profile: str | None = None
     tcp_analytics_profile_created: bool | None = None
+    log_syslog_target: str | None = None
+    log_hsl_target: str | None = None
     export_metrics: bool = True
     export_logs: bool = True
 
@@ -92,6 +95,7 @@ class _Session:
 _sessions: dict[str, _Session] = {}
 _export_loop: MetricsExportLoop | None = None
 _pusher: OTLPMetricsPusher | None = None
+_log_export: dict[str, Any] = {"active": False, "hosts": [], "syslog_target": None, "hsl_target": None}
 _collector_exporters: list[dict[str, Any]] = [
     {"type": "prometheus", "enabled": True, "params": {"endpoint": "0.0.0.0:8889"}},
 ]
@@ -159,6 +163,8 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
         "http_analytics_profile_created": sess.http_analytics_profile_created,
         "tcp_analytics_profile": sess.tcp_analytics_profile,
         "tcp_analytics_profile_created": sess.tcp_analytics_profile_created,
+        "log_syslog_target": sess.log_syslog_target,
+        "log_hsl_target": sess.log_hsl_target,
         "export_metrics": sess.export_metrics,
         "export_logs": sess.export_logs,
         "connected_since": sess.created,
@@ -223,6 +229,8 @@ class ConnectResponse(BaseModel):
     http_analytics_profile_created: bool | None = None
     tcp_analytics_profile: str | None = None
     tcp_analytics_profile_created: bool | None = None
+    log_syslog_target: str | None = None
+    log_hsl_target: str | None = None
     export_metrics: bool = True
     export_logs: bool = True
 
@@ -302,6 +310,7 @@ def runtime_config(request: Request) -> dict[str, str]:
         "collector_metrics": urls["collector_metrics"],
         "collector_config_path": str(GENERATED_CONFIG_PATH),
         "access_host": _browser_host(request),
+        **runtime_log_config(),
     }
 
 
@@ -386,9 +395,11 @@ def connect(body: ConnectBody) -> ConnectResponse:
         http_analytics_profile_created: bool | None = None
         tcp_analytics_profile: str | None = None
         tcp_analytics_profile_created: bool | None = None
+        log_syslog_target: str | None = None
+        log_hsl_target: str | None = None
         if body.export_logs:
             try:
-                profiles = ensure_log_profiles_via_as3(client)
+                profiles = ensure_log_profiles_via_as3(client, log_host=syslog_host())
                 request_log_profile = profiles.request_log_profile
                 request_log_profile_created = profiles.request_log_profile_created
                 asm_log_profile = profiles.asm_log_profile
@@ -399,6 +410,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
                 http_analytics_profile_created = profiles.http_analytics_profile_created
                 tcp_analytics_profile = profiles.tcp_analytics_profile
                 tcp_analytics_profile_created = profiles.tcp_analytics_profile_created
+                log_syslog_target = profiles.log_syslog_target
+                log_hsl_target = profiles.log_hsl_target
             except BigIPError as exc:
                 warning = _append_warning(
                     warning,
@@ -426,6 +439,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
             http_analytics_profile_created=http_analytics_profile_created,
             tcp_analytics_profile=tcp_analytics_profile,
             tcp_analytics_profile_created=tcp_analytics_profile_created,
+            log_syslog_target=log_syslog_target,
+            log_hsl_target=log_hsl_target,
             export_metrics=body.export_metrics,
             export_logs=body.export_logs,
         )
@@ -444,6 +459,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
             http_analytics_profile_created=http_analytics_profile_created,
             tcp_analytics_profile=tcp_analytics_profile,
             tcp_analytics_profile_created=tcp_analytics_profile_created,
+            log_syslog_target=log_syslog_target,
+            log_hsl_target=log_hsl_target,
             export_metrics=body.export_metrics,
             export_logs=body.export_logs,
         )
@@ -544,10 +561,11 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
 
 @app.get("/api/export/status")
 def export_status() -> dict[str, Any]:
-    global _export_loop, _pusher
+    global _export_loop, _pusher, _log_export
     _gc_sessions()
     return {
         "loop": _export_loop.status if _export_loop else {"running": False},
+        "log_forwarding": _log_export,
         "otlp_endpoint": getattr(_pusher, "_endpoint", None) if _pusher else None,
         "connected_devices": [
             _session_to_dict(sid, s) for sid, s in _sessions.items()
@@ -555,7 +573,9 @@ def export_status() -> dict[str, Any]:
     }
 
 
-def _resolve_export_clients(session_ids: list[str]) -> list[tuple[str, str, BigIPClient]]:
+def _resolve_export_sessions(
+    session_ids: list[str],
+) -> tuple[list[tuple[str, str, BigIPClient]], list[str]]:
     _gc_sessions()
     ids = session_ids or list(_sessions.keys())
     if not ids:
@@ -563,72 +583,114 @@ def _resolve_export_clients(session_ids: list[str]) -> list[tuple[str, str, BigI
             status_code=400,
             detail="No BIG-IP devices connected. Add at least one device before starting export.",
         )
-    clients: list[tuple[str, str, BigIPClient]] = []
-    skipped: list[str] = []
+    metrics_clients: list[tuple[str, str, BigIPClient]] = []
+    log_hosts: list[str] = []
     for sid in ids:
         sess = _get_session(sid)
-        if not sess.export_metrics:
-            skipped.append(sess.label or _display_host(sess.host))
-            continue
-        clients.append((_display_host(sess.host), sid, sess.client))
-    if not clients:
-        detail = "No selected devices have metrics export enabled."
-        if skipped:
-            detail += f" Skipped (logs only): {', '.join(skipped)}."
-        raise HTTPException(status_code=400, detail=detail)
-    return clients
+        label = sess.label or _display_host(sess.host)
+        if sess.export_metrics:
+            metrics_clients.append((_display_host(sess.host), sid, sess.client))
+        if sess.export_logs:
+            log_hosts.append(label)
+    if not metrics_clients and not log_hosts:
+        raise HTTPException(
+            status_code=400,
+            detail="No selected devices have metrics or log export enabled.",
+        )
+    return metrics_clients, log_hosts
 
 
 @app.post("/api/export/start")
 def export_start(body: ExportStartBody) -> dict[str, Any]:
-    global _export_loop, _pusher
-    clients = _resolve_export_clients(body.session_ids)
-    endpoints = body.endpoints
-    if not endpoints:
-        rows = _load_apis()
-        if body.metrics_only:
-            rows = [r for r in rows if r.get("collect_metrics", "").lower() == "true"]
-        if body.modules:
-            mods = {m.upper() for m in body.modules}
-            rows = [r for r in rows if (r.get("module") or "").upper() in mods]
-        endpoints = [r["endpoint"] for r in rows]
-    if not endpoints:
-        raise HTTPException(status_code=400, detail="No endpoints selected")
+    global _export_loop, _pusher, _log_export
+    metrics_clients, log_hosts = _resolve_export_sessions(body.session_ids)
 
-    if _export_loop and _export_loop.status.get("running"):
-        _export_loop.stop()
-    if _pusher:
-        _pusher.shutdown()
-
-    otlp = body.otlp_endpoint.rstrip("/")
-    _pusher = OTLPMetricsPusher(otlp)
-    _export_loop = MetricsExportLoop(
-        clients,
-        endpoints,
-        _pusher,
-        poll_interval_sec=body.poll_interval_sec,
-    )
-    result = _export_loop.run_once()
-    _export_loop.start_background()
-    return {
-        "started": True,
-        "endpoints": len(endpoints),
-        "bigip_count": len(clients),
-        "bigip_hosts": [h for h, _, _ in clients],
-        "first_run": result,
-        "status": _export_loop.status,
+    log_cfg = runtime_log_config()
+    _log_export = {
+        "active": bool(log_hosts),
+        "hosts": log_hosts,
+        "syslog_target": log_cfg["log_syslog_target"] if log_hosts else None,
+        "hsl_target": log_cfg["log_hsl_target"] if log_hosts else None,
+        "note": (
+            "BIG-IP forwards ASM/AFM logs via syslog to "
+            f"{log_cfg['log_syslog_target']} and LTM request/response logs via HSL to "
+            f"{log_cfg['log_hsl_target']}. Attach logging profiles to virtual servers "
+            "and ensure BIG-IP can reach both addresses."
+            if log_hosts
+            else None
+        ),
     }
+
+    response: dict[str, Any] = {
+        "started": True,
+        "log_forwarding": _log_export,
+        "bigip_count": len({h for h, _, _ in metrics_clients} | set(log_hosts)),
+        "metrics_hosts": [h for h, _, _ in metrics_clients],
+        "log_hosts": log_hosts,
+    }
+
+    if metrics_clients:
+        endpoints = body.endpoints
+        if not endpoints:
+            rows = _load_apis()
+            if body.metrics_only:
+                rows = [r for r in rows if r.get("collect_metrics", "").lower() == "true"]
+            if body.modules:
+                mods = {m.upper() for m in body.modules}
+                rows = [r for r in rows if (r.get("module") or "").upper() in mods]
+            endpoints = [r["endpoint"] for r in rows]
+        if not endpoints:
+            raise HTTPException(status_code=400, detail="No endpoints selected")
+
+        if _export_loop and _export_loop.status.get("running"):
+            _export_loop.stop()
+        if _pusher:
+            _pusher.shutdown()
+
+        otlp = body.otlp_endpoint.rstrip("/")
+        _pusher = OTLPMetricsPusher(otlp)
+        _export_loop = MetricsExportLoop(
+            metrics_clients,
+            endpoints,
+            _pusher,
+            poll_interval_sec=body.poll_interval_sec,
+        )
+        result = _export_loop.run_once()
+        _export_loop.start_background()
+        response.update(
+            {
+                "endpoints": len(endpoints),
+                "first_run": result,
+                "status": _export_loop.status,
+            },
+        )
+    else:
+        if _export_loop and _export_loop.status.get("running"):
+            _export_loop.stop()
+        if _pusher:
+            _pusher.shutdown()
+        _export_loop = None
+        _pusher = None
+        response["mode"] = "logs_only"
+
+    return response
 
 
 @app.post("/api/export/stop")
 def export_stop() -> dict[str, Any]:
-    global _export_loop, _pusher
+    global _export_loop, _pusher, _log_export
     if _export_loop:
         _export_loop.stop()
     if _pusher:
         _pusher.shutdown()
     _export_loop = None
     _pusher = None
+    _log_export = {
+        "active": False,
+        "hosts": [],
+        "syslog_target": None,
+        "hsl_target": None,
+    }
     return {"stopped": True}
 
 

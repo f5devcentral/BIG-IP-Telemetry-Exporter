@@ -15,6 +15,12 @@ spec:
     - name: otlp-http
       port: 4318
       targetPort: otlp-http
+    - name: syslog
+      port: 5140
+      targetPort: syslog
+    - name: tcplog
+      port: 5141
+      targetPort: tcplog
     - name: prometheus
       port: 8889
       targetPort: prometheus

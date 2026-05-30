@@ -25,6 +25,10 @@ spec:
               containerPort: 4317
             - name: otlp-http
               containerPort: 4318
+            - name: syslog
+              containerPort: 5140
+            - name: tcplog
+              containerPort: 5141
             - name: prometheus
               containerPort: 8889
             - name: health
