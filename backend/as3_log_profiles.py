@@ -186,14 +186,20 @@ def _traffic_log_profile() -> dict[str, Any]:
     }
 
 
-def _asm_security_log_profile() -> dict[str, Any]:
-    """ASM application security logging — remote syslog via shared log publisher."""
+def _asm_security_log_profile(host: str) -> dict[str, Any]:
+    """ASM application security logging — remote reporting server to collector syslog port."""
     return {
         "class": "Security_Log_Profile",
         "application": {
             "localStorage": False,
             "remoteStorage": "remote",
-            "remotePublisher": {"use": LOG_PUBLISHER_NAME},
+            "protocol": "tcp",
+            "servers": [
+                {
+                    "address": host,
+                    "port": str(syslog_port()),
+                },
+            ],
             "storageFilter": {
                 "requestType": "all",
             },
@@ -265,13 +271,13 @@ def build_log_profiles_declaration(
     """Build an AS3 ADC declaration containing remote logging/analytics profiles."""
     app_objects: dict[str, Any] = {}
 
-    need_syslog = include_asm or include_afm
+    need_syslog_chain = include_afm
     need_hsl = include_ltm and _ltm_enabled()
-    if need_syslog or need_hsl:
+    if need_syslog_chain or need_hsl:
         app_objects.update(
             _build_remote_log_infrastructure(
                 log_host,
-                include_syslog=need_syslog,
+                include_syslog=need_syslog_chain,
                 include_hsl=need_hsl,
             ),
         )
@@ -280,7 +286,7 @@ def build_log_profiles_declaration(
         app_objects[_request_log_name()] = _traffic_log_profile()
 
     if include_asm and _asm_enabled():
-        app_objects[_asm_name()] = _asm_security_log_profile()
+        app_objects[_asm_name()] = _asm_security_log_profile(log_host)
 
     if include_afm and _afm_enabled():
         app_objects[_afm_name()] = _afm_security_log_profile()
