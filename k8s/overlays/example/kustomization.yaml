@@ -6,18 +6,18 @@ resources:
 
 # Point at your container registry after building the backend image.
 images:
-  - name: bigip-metrics-exporter
-    newName: ghcr.io/gregcoward/bigip-metrics-exporter
+  - name: bigip-telemetry-exporter
+    newName: ghcr.io/gregcoward/bigip-telemetry-exporter
     newTag: "1.0.0"
 
 patches:
   - target:
       kind: Ingress
-      name: bigip-metrics
+      name: bigip-telemetry
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: bigip-metrics.mycompany.example
+        value: bigip-telemetry.mycompany.example
       - op: replace
         path: /spec/rules/1/host
-        value: prometheus.bigip-metrics.mycompany.example
+        value: prometheus.bigip-telemetry.mycompany.example

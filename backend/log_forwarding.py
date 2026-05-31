@@ -7,11 +7,11 @@ import os
 DEFAULT_SYSLOG_PORT = 5140
 DEFAULT_HSL_PORT = 5141
 
-LOG_POOL_NAME = "bigip-metrics-log-pool"
-LOG_HSL_POOL_NAME = "bigip-metrics-log-hsl-pool"
-LOG_HSL_DEST_NAME = "bigip-metrics-log-hsl-dest"
-LOG_SYSLOG_DEST_NAME = "bigip-metrics-log-syslog-dest"
-LOG_PUBLISHER_NAME = "bigip-metrics-log-publisher"
+LOG_POOL_NAME = "bigip-telemetry-log-pool"
+LOG_HSL_POOL_NAME = "bigip-telemetry-log-hsl-pool"
+LOG_HSL_DEST_NAME = "bigip-telemetry-log-hsl-dest"
+LOG_SYSLOG_DEST_NAME = "bigip-telemetry-log-syslog-dest"
+LOG_PUBLISHER_NAME = "bigip-telemetry-log-publisher"
 
 
 def _env_int(name: str, default: int) -> int:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove the BIG-IP Metrics Exporter stack from Kubernetes.
+# Remove the BIG-IP Telemetry Exporter stack from Kubernetes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OVERLAY="local"
@@ -17,7 +17,7 @@ Overlays (use the same overlay you deployed with k8s-deploy.sh):
 
 Options:
   -y, --yes              Skip confirmation prompt
-  -n, --keep-namespace   Remove workloads but keep namespace bigip-metrics
+  -n, --keep-namespace   Remove workloads but keep namespace bigip-telemetry
   -h, --help             Show this help
 
 Environment:
@@ -73,17 +73,17 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! kubectl get namespace bigip-metrics >/dev/null 2>&1; then
-  echo "Namespace bigip-metrics does not exist — nothing to uninstall."
+if ! kubectl get namespace bigip-telemetry >/dev/null 2>&1; then
+  echo "Namespace bigip-telemetry does not exist — nothing to uninstall."
   exit 0
 fi
 
-echo "Remove BIG-IP Metrics Exporter (overlay: ${OVERLAY})"
+echo "Remove BIG-IP Telemetry Exporter (overlay: ${OVERLAY})"
 echo "  Path: ${KUSTOMIZE_PATH}"
 if [[ "${DELETE_NAMESPACE}" == "1" ]]; then
-  echo "  Will delete all resources and namespace bigip-metrics."
+  echo "  Will delete all resources and namespace bigip-telemetry."
 else
-  echo "  Will delete workloads; namespace bigip-metrics will remain."
+  echo "  Will delete workloads; namespace bigip-telemetry will remain."
 fi
 
 if [[ -z "${CONFIRM}" ]]; then
@@ -99,23 +99,23 @@ if [[ "${DELETE_NAMESPACE}" == "1" ]]; then
   echo "Running: kubectl delete -k ${KUSTOMIZE_PATH} --wait"
   kubectl delete -k "${KUSTOMIZE_PATH}" --ignore-not-found --wait=true --timeout=180s
 else
-  echo "Deleting namespaced resources in bigip-metrics..."
-  kubectl -n bigip-metrics delete deployment,service,configmap,ingress --all \
+  echo "Deleting namespaced resources in bigip-telemetry..."
+  kubectl -n bigip-telemetry delete deployment,service,configmap,ingress --all \
     --ignore-not-found --wait=true --timeout=180s
-  kubectl -n bigip-metrics delete role,rolebinding,serviceaccount --all \
+  kubectl -n bigip-telemetry delete role,rolebinding,serviceaccount --all \
     --ignore-not-found --wait=true --timeout=60s
 fi
 
 echo ""
-if kubectl get namespace bigip-metrics >/dev/null 2>&1; then
-  echo "Remaining resources in bigip-metrics:"
-  kubectl -n bigip-metrics get all 2>/dev/null || true
+if kubectl get namespace bigip-telemetry >/dev/null 2>&1; then
+  echo "Remaining resources in bigip-telemetry:"
+  kubectl -n bigip-telemetry get all 2>/dev/null || true
 else
-  echo "Namespace bigip-metrics removed."
+  echo "Namespace bigip-telemetry removed."
 fi
 
 echo ""
 echo "Uninstall complete."
 echo "Tip: stop any active port-forward sessions (Ctrl+C in those terminals)."
-echo "Local image bigip-metrics-exporter:latest was not removed."
-echo "  docker rmi bigip-metrics-exporter:latest   # optional"
+echo "Local image bigip-telemetry-exporter:latest was not removed."
+echo "  docker rmi bigip-telemetry-exporter:latest   # optional"

@@ -10,6 +10,6 @@ patches:
 
 # Use an image built on your machine (see scripts/k8s-load-image.sh).
 images:
-  - name: bigip-metrics-exporter
-    newName: bigip-metrics-exporter
+  - name: bigip-telemetry-exporter
+    newName: bigip-telemetry-exporter
     newTag: latest

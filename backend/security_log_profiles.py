@@ -18,12 +18,12 @@ __all__ = [
 
 SECURITY_LOG_PROFILE_COLLECTION = "/mgmt/tm/security/log/profile"
 DEFAULT_PARTITION = "Common"
-DEFAULT_ASM_NAME = "bigip-metrics-asm-log"
-DEFAULT_AFM_NAME = "bigip-metrics-afm-log"
+DEFAULT_ASM_NAME = "bigip-telemetry-asm-log"
+DEFAULT_AFM_NAME = "bigip-telemetry-afm-log"
 DEFAULT_AFM_LOG_PUBLISHER = "/Common/local-db-publisher"
 DEFAULT_AFM_AGGREGATE_RATE_LIMIT = 1000
 AFM_DESCRIPTION = (
-    "Created by BIG-IP Metrics Exporter. Attach as a Security Log Profile on virtual servers "
+    "Created by BIG-IP Telemetry Exporter. Attach as a Security Log Profile on virtual servers "
     "for AFM (Network Firewall); logs ACL matches and network events for future OTLP export."
 )
 

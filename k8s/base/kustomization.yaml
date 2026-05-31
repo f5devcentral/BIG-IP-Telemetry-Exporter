@@ -1,11 +1,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: bigip-metrics
+namespace: bigip-telemetry
 
 labels:
   - pairs:
-      app.kubernetes.io/part-of: bigip-metrics-exporter
+      app.kubernetes.io/part-of: bigip-telemetry-exporter
       app.kubernetes.io/managed-by: kustomize
     includeSelectors: false
 
@@ -23,6 +23,6 @@ resources:
   - ingress.yaml
 
 images:
-  - name: bigip-metrics-exporter
-    newName: bigip-metrics-exporter
+  - name: bigip-telemetry-exporter
+    newName: bigip-telemetry-exporter
     newTag: latest

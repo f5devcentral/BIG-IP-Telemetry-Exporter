@@ -96,9 +96,7 @@ _sessions: dict[str, _Session] = {}
 _export_loop: MetricsExportLoop | None = None
 _pusher: OTLPMetricsPusher | None = None
 _log_export: dict[str, Any] = {"active": False, "hosts": [], "syslog_target": None, "hsl_target": None}
-_collector_metric_exporters: list[dict[str, Any]] = [
-    {"type": "prometheus", "enabled": True, "params": {"endpoint": "0.0.0.0:8889"}},
-]
+_collector_metric_exporters: list[dict[str, Any]] = []
 _collector_log_exporters: list[dict[str, Any]] = [
     {"type": "debug", "enabled": True, "params": {"verbosity": "basic"}},
 ]
@@ -281,7 +279,7 @@ class ProbeBody(BaseModel):
     session_id: str = ""
 
 
-app = FastAPI(title="BIG-IP Metrics Exporter", version="1.0.0")
+app = FastAPI(title="BIG-IP Telemetry Exporter", version="1.0.0")
 
 
 @app.exception_handler(Exception)
@@ -597,9 +595,9 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
         "export_logs": _collector_export_logs,
         "restart_command": restart,
         "k8s_apply_hint": (
-            "kubectl -n bigip-metrics create configmap otel-collector-config "
+            "kubectl -n bigip-telemetry create configmap otel-collector-config "
             "--from-file=config.yaml=<path> --dry-run=client -o yaml | kubectl apply -f - "
-            "&& kubectl -n bigip-metrics rollout restart deployment/otel-collector"
+            "&& kubectl -n bigip-telemetry rollout restart deployment/otel-collector"
         ),
     }
 
@@ -779,8 +777,8 @@ def _yaml_dump(cfg: dict[str, Any]) -> str:
 
 def _ui_setup_hint() -> str:
     return (
-        "<!DOCTYPE html><html><head><title>BIG-IP Metrics Exporter</title></head><body>"
-        "<h1>BIG-IP Metrics Exporter</h1>"
+        "<!DOCTYPE html><html><head><title>BIG-IP Telemetry Exporter</title></head><body>"
+        "<h1>BIG-IP Telemetry Exporter</h1>"
         "<p>The web UI is not built yet. From the project root run:</p>"
         "<pre>cd frontend && npm ci && npm run build</pre>"
         "<p>Then restart <code>python run_server.py</code> and open "

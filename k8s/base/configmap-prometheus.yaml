@@ -16,7 +16,7 @@ data:
           - role: endpoints
             namespaces:
               names:
-                - bigip-metrics
+                - bigip-telemetry
         relabel_configs:
           - source_labels: [__meta_kubernetes_service_name]
             action: keep
@@ -29,7 +29,7 @@ data:
           - role: endpoints
             namespaces:
               names:
-                - bigip-metrics
+                - bigip-telemetry
         relabel_configs:
           - source_labels: [__meta_kubernetes_service_name]
             action: keep

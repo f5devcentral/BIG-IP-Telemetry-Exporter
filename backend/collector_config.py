@@ -23,6 +23,26 @@ GENERATED_CONFIG_PATH = Path(
 )
 
 
+VALIDATION_PROMETHEUS_ENDPOINT = "0.0.0.0:8889"
+
+
+def _prometheus_endpoint(params: dict[str, Any]) -> str:
+    return str(params.get("endpoint", VALIDATION_PROMETHEUS_ENDPOINT)).strip()
+
+
+def _skips_duplicate_validation_prometheus(
+    etype: str,
+    params: dict[str, Any],
+    *,
+    include_validation_prometheus: bool,
+) -> bool:
+    """The validation exporter already binds :8889; skip a second prometheus on the same port."""
+    if not include_validation_prometheus or etype != "prometheus":
+        return False
+    endpoint = _prometheus_endpoint(params)
+    return endpoint in {VALIDATION_PROMETHEUS_ENDPOINT, ":8889", "8889"}
+
+
 def _append_pipeline_exporters(
     items: list[dict[str, Any]],
     *,
@@ -37,15 +57,21 @@ def _append_pipeline_exporters(
             continue
         etype = item["type"]
         params = {**(item.get("params") or {}), "_pipeline": pipeline}
-        if etype == "prometheus" and include_validation_prometheus:
-            component, block = resolve_exporter(etype, params)
-            key = f"{component}/user{idx}"
-        else:
-            component, block = resolve_exporter(etype, params)
-            prefix = "m" if pipeline == "metrics" else "l"
-            key = f"{component}/{prefix}{idx}"
+        if _skips_duplicate_validation_prometheus(
+            etype,
+            params,
+            include_validation_prometheus=include_validation_prometheus,
+        ):
+            continue
+        component, block = resolve_exporter(etype, params)
+        prefix = "m" if pipeline == "metrics" else "l"
+        key = f"{component}/{prefix}{idx}"
         exporters[key] = block
         pipeline_keys.append(key)
+
+
+def _has_enabled_exporters(items: list[dict[str, Any]]) -> bool:
+    return any(item.get("enabled", True) for item in items)
 
 
 def build_collector_config(
@@ -60,9 +86,12 @@ def build_collector_config(
     Build collector YAML from separate metric and log exporter selections.
 
     metric_exporters / log_exporters: [{type, params, enabled}]
-    Pipelines are included only when the corresponding export mode is enabled.
+    Pipelines are included when the export mode is enabled or when exporters
+    are configured for that signal (so tcplog/syslog listeners stay up).
     """
     log_exporters = log_exporters if log_exporters is not None else []
+    export_metrics = export_metrics or _has_enabled_exporters(metric_exporters)
+    export_logs = export_logs or _has_enabled_exporters(log_exporters)
 
     exporters: dict[str, Any] = {}
     metric_pipeline_keys: list[str] = []

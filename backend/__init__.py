@@ -1,1 +1,1 @@
-"""BIG-IP Metrics Exporter backend."""
+"""BIG-IP Telemetry Exporter backend."""

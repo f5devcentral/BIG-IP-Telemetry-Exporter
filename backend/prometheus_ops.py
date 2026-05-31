@@ -87,7 +87,7 @@ def _detect_restart_mode() -> str:
 
 
 def restart_hint(mode: str) -> str:
-    ns = os.environ.get("PROMETHEUS_K8S_NAMESPACE", "bigip-metrics")
+    ns = os.environ.get("PROMETHEUS_K8S_NAMESPACE", "bigip-telemetry")
     if mode == "docker":
         return (
             f"docker compose -f {COMPOSE_FILE} stop {PROMETHEUS_SERVICE} && "
@@ -129,7 +129,7 @@ def _wipe_tsdb_kubernetes() -> dict[str, Any]:
             "kubectl not found. From a machine with cluster access run: "
             f"{restart_hint('kubernetes')}",
         )
-    ns = os.environ.get("PROMETHEUS_K8S_NAMESPACE", "bigip-metrics")
+    ns = os.environ.get("PROMETHEUS_K8S_NAMESPACE", "bigip-telemetry")
     cmd = [
         "kubectl",
         "rollout",

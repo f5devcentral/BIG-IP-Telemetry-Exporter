@@ -1,5 +1,5 @@
 {
-  "name": "bigip-metrics-exporter-ui",
+  "name": "bigip-telemetry-exporter-ui",
   "private": true,
   "version": "1.0.0",
   "type": "module",

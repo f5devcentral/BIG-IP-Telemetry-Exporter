@@ -23,7 +23,7 @@ class OTLPMetricsPusher:
         self._endpoint = endpoint.rstrip("/").removesuffix("/v1/metrics")
         resource = Resource.create(
             {
-                "service.name": "bigip-metrics-exporter",
+                "service.name": "bigip-telemetry-exporter",
                 "service.namespace": "f5",
             }
         )

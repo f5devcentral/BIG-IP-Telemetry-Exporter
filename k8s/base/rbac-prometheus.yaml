@@ -25,4 +25,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: prometheus
-    namespace: bigip-metrics
+    namespace: bigip-telemetry

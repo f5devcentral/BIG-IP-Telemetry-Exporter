@@ -26,7 +26,7 @@ exporters:
   prometheus/validation:
     endpoint: 0.0.0.0:8889
     const_labels:
-      source: bigip-metrics-exporter
+      source: bigip-telemetry-exporter
   debug/logs:
     verbosity: basic
 

@@ -9,11 +9,11 @@ from backend.bigip_client import BigIPClient
 from backend.bigip_resource import ensure_config_object, is_not_found
 from backend.log_templates import REQUEST_EVENT_TEMPLATE, RESPONSE_EVENT_TEMPLATE
 
-DEFAULT_PROFILE_NAME = "bigip-metrics-requestlog"
+DEFAULT_PROFILE_NAME = "bigip-telemetry-requestlog"
 DEFAULT_PARTITION = "Common"
 PROFILE_COLLECTION = "/mgmt/tm/ltm/profile/request-log"
 PROFILE_DESCRIPTION = (
-    "Created by BIG-IP Metrics Exporter. Attach to virtual servers as a Request Logging "
+    "Created by BIG-IP Telemetry Exporter. Attach to virtual servers as a Request Logging "
     "profile; request/response logs will be forwarded to the OpenTelemetry collector in a "
     "future release."
 )

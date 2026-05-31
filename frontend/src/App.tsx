@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import f5LogoUrl from "../../F5-logo-F5-rgb.svg";
 
-const THEME_STORAGE_KEY = "bigip-metrics-ui-theme";
+const THEME_STORAGE_KEY = "bigip-telemetry-ui-theme";
 type ThemeMode = "light" | "dark" | "system";
 
 type ApiRow = {
@@ -141,9 +141,7 @@ async function readJson<T>(r: Response): Promise<T> {
   return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
-const DEFAULT_METRIC_EXPORTERS: ExporterConfig[] = [
-  { type: "prometheus", enabled: true, params: { endpoint: "0.0.0.0:8889" } },
-];
+const DEFAULT_METRIC_EXPORTERS: ExporterConfig[] = [];
 
 const DEFAULT_LOG_EXPORTERS: ExporterConfig[] = [
   { type: "debug", enabled: true, params: { verbosity: "basic" } },
@@ -428,8 +426,9 @@ export default function App() {
         body: JSON.stringify({
           metric_exporters: metricExporters,
           log_exporters: logExporters,
-          export_metrics: collectorExportModes.metrics,
-          export_logs: collectorExportModes.logs,
+          export_metrics:
+            collectorExportModes.metrics || metricExporters.some((e) => e.enabled),
+          export_logs: collectorExportModes.logs || logExporters.some((e) => e.enabled),
         }),
       });
       const data = await readJson<{ yaml: string; restart_command: string }>(r);
@@ -852,9 +851,9 @@ export default function App() {
         <div className="app-header-brand">
           <img src={f5LogoUrl} alt="F5" className="app-header-logo" />
           <div className="app-header-main">
-            <h1 className="app-title">BIG-IP Metrics Exporter</h1>
+            <h1 className="app-title">BIG-IP Telemetry Exporter</h1>
             <p className="muted">
-              Pull iControl REST metrics, push via OTLP to the OpenTelemetry Collector, validate in
+              Export BIG-IP metrics and logs via OpenTelemetry Collector; validate metrics in
               Prometheus.
             </p>
           </div>

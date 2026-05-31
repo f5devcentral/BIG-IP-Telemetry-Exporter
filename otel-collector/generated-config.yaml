@@ -5,6 +5,12 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+  syslog:
+    tcp:
+      listen_address: 0.0.0.0:5140
+    protocol: rfc5424
+  tcplog:
+    listen_address: 0.0.0.0:5141
 processors:
   batch:
     timeout: 5s
@@ -17,11 +23,9 @@ exporters:
   prometheus/validation:
     endpoint: 0.0.0.0:8889
     const_labels:
-      source: bigip-metrics-exporter
-  debug/0:
+      source: bigip-telemetry-exporter
+  debug/logs:
     verbosity: basic
-    sampling_initial: 5
-    sampling_thereafter: 200
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -37,7 +41,15 @@ service:
       - batch
       exporters:
       - prometheus/validation
-      - debug/0
+    logs:
+      receivers:
+      - syslog
+      - tcplog
+      processors:
+      - memory_limiter
+      - batch
+      exporters:
+      - debug/logs
   telemetry:
     logs:
       level: info

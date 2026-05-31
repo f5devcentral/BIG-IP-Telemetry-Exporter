@@ -2,9 +2,9 @@
 
 This document is the detailed companion to the [Kubernetes section in README](../README.md). For day-to-day UI workflow (multi-BIG-IP, export, Prometheus), see the **[User guide](user-guide.md)**.
 
-It describes how to run the **entire** BIG-IP Metrics Exporter stack on Kubernetes:
+It describes how to run the **entire** BIG-IP Telemetry Exporter stack on Kubernetes:
 
-- **bigip-metrics-backend** — Python API + React UI (single container image)
+- **bigip-telemetry-backend** — Python API + React UI (single container image)
 - **otel-collector** — OpenTelemetry Collector Contrib
 - **prometheus** — scrapes the collector’s Prometheus exporter for validation
 
@@ -47,8 +47,8 @@ chmod +x scripts/k8s-build-image.sh
 ./scripts/k8s-build-image.sh
 
 # Tag and push to your registry, for example:
-docker tag bigip-metrics-exporter:latest ghcr.io/<org>/bigip-metrics-exporter:1.0.0
-docker push ghcr.io/<org>/bigip-metrics-exporter:1.0.0
+docker tag bigip-telemetry-exporter:latest ghcr.io/<org>/bigip-telemetry-exporter:1.0.0
+docker push ghcr.io/<org>/bigip-telemetry-exporter:1.0.0
 ```
 
 ### 2. Choose an overlay
@@ -60,7 +60,7 @@ docker push ghcr.io/<org>/bigip-metrics-exporter:1.0.0
 | `example` | Registry + Ingress hostnames (edit `kustomization.yaml`) |
 | `base` | Raw manifests; same image requirements as `minimal` |
 
-> **Important:** `bigip-metrics-exporter:latest` is **not** on Docker Hub. An unqualified name resolves to `docker.io/library/bigip-metrics-exporter`, which causes `ErrImagePull` / `authorization failed`.
+> **Important:** `bigip-telemetry-exporter:latest` is **not** on Docker Hub. An unqualified name resolves to `docker.io/library/bigip-telemetry-exporter`, which causes `ErrImagePull` / `authorization failed`.
 
 ### 3. Deploy
 
@@ -76,8 +76,8 @@ chmod +x scripts/k8s-build-image.sh scripts/k8s-load-image.sh scripts/k8s-deploy
 **Registry:**
 
 ```bash
-export IMAGE=ghcr.io/<org>/bigip-metrics-exporter:1.0.0
-docker tag bigip-metrics-exporter:latest "${IMAGE}"
+export IMAGE=ghcr.io/<org>/bigip-telemetry-exporter:1.0.0
+docker tag bigip-telemetry-exporter:latest "${IMAGE}"
 docker push "${IMAGE}"
 IMAGE="${IMAGE}" ./scripts/k8s-deploy.sh minimal
 ```
@@ -91,8 +91,8 @@ Use `--address 0.0.0.0` so the UI is reachable via your machine’s IP, not only
 ```bash
 export HOST_IP="$(./scripts/host-ip.sh)"   # LAN IP shown to clients
 
-kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/bigip-metrics-backend 8001:8000
-kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/prometheus 9090:9090
+kubectl -n bigip-telemetry port-forward --address 0.0.0.0 svc/bigip-telemetry-backend 8001:8000
+kubectl -n bigip-telemetry port-forward --address 0.0.0.0 svc/prometheus 9090:9090
 ```
 
 - UI + API: `http://<HOST-IP>:8001` (local port **8001** → service port 8000)  
@@ -116,10 +116,10 @@ chmod +x scripts/k8s-apply-collector-config.sh
 Or manually:
 
 ```bash
-kubectl -n bigip-metrics create configmap otel-collector-config \
+kubectl -n bigip-telemetry create configmap otel-collector-config \
   --from-file=config.yaml=./otel-collector/generated-config.yaml \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n bigip-metrics rollout restart deployment/otel-collector
+kubectl -n bigip-telemetry rollout restart deployment/otel-collector
 ```
 
 ### 6. Connect to BIG-IP and start export
@@ -136,7 +136,7 @@ Credentials are **not** stored in Kubernetes Secrets by default—they are enter
 - Every management IP is reachable from pods.
 - TLS verification matches your BIG-IP cert (checkbox in UI).
 
-The backend uses `OTLP_HTTP_ENDPOINT=http://otel-collector.bigip-metrics.svc.cluster.local:4318` and listens on container port **8000** (`PORT=8000` in the Deployment).
+The backend uses `OTLP_HTTP_ENDPOINT=http://otel-collector.bigip-telemetry.svc.cluster.local:4318` and listens on container port **8000** (`PORT=8000` in the Deployment).
 
 ### 7. Validate metrics in Prometheus
 
@@ -159,7 +159,7 @@ Confirm the `otel-collector` scrape target is **UP** (Status → Targets). Use *
 | Variable | Default (K8s manifest) | Purpose |
 |----------|------------------------|---------|
 | `PORT` | `8000` | HTTP listen port inside the container (Service targets 8000) |
-| `OTLP_HTTP_ENDPOINT` | `http://otel-collector.bigip-metrics.svc.cluster.local:4318` | Backend → collector (in-cluster) |
+| `OTLP_HTTP_ENDPOINT` | `http://otel-collector.bigip-telemetry.svc.cluster.local:4318` | Backend → collector (in-cluster) |
 | `ACCESS_HOST` | *(unset)* | Force browser link hostname; default = HTTP `Host` header |
 | `PROMETHEUS_BROWSER_PORT` | `9090` | Prometheus UI port on the host running port-forward |
 | `COLLECTOR_METRICS_BROWSER_PORT` | `8889` | Collector `/metrics` port on the host |
@@ -179,7 +179,7 @@ The exporter pod must reach BIG-IP management interfaces. Common patterns:
 If connection fails from the UI but works locally on your laptop, debug with:
 
 ```bash
-kubectl -n bigip-metrics exec -it deploy/bigip-metrics-backend -- \
+kubectl -n bigip-telemetry exec -it deploy/bigip-telemetry-backend -- \
   python -c "import urllib.request; urllib.request.urlopen('https://<BIG-IP-MGMT-IP>/mgmt/shared/ident', context=__import__('ssl')._create_unverified_context())"
 ```
 
@@ -190,7 +190,7 @@ kubectl -n bigip-metrics exec -it deploy/bigip-metrics-backend -- \
 docker push <your-image>:<tag>
 # Update image tag in overlay kustomization.yaml
 kubectl apply -k k8s/overlays/minimal
-kubectl -n bigip-metrics rollout status deployment/bigip-metrics-backend
+kubectl -n bigip-telemetry rollout status deployment/bigip-telemetry-backend
 ```
 
 ## Uninstall
@@ -205,7 +205,7 @@ chmod +x scripts/k8s-uninstall.sh
 | Option | Effect |
 |--------|--------|
 | `-y` / `--yes` | Skip confirmation |
-| `--keep-namespace` | Delete Deployments/Services/ConfigMaps/RBAC; leave `bigip-metrics` namespace |
+| `--keep-namespace` | Delete Deployments/Services/ConfigMaps/RBAC; leave `bigip-telemetry` namespace |
 
 Examples:
 
@@ -220,19 +220,19 @@ Manual equivalent:
 kubectl delete -k k8s/overlays/local --wait --timeout=180s
 ```
 
-The namespace `bigip-metrics` and all workloads (otel-collector, prometheus, backend) are removed. Port-forward processes on your workstation are not stopped automatically — press Ctrl+C in those terminals.
+The namespace `bigip-telemetry` and all workloads (otel-collector, prometheus, backend) are removed. Port-forward processes on your workstation are not stopped automatically — press Ctrl+C in those terminals.
 
 Optional cleanup on your build host:
 
 ```bash
-docker rmi bigip-metrics-exporter:latest
+docker rmi bigip-telemetry-exporter:latest
 ```
 
 ## Troubleshooting
 
 | Symptom | Check |
 |---------|--------|
-| `ErrImagePull` / `authorization failed` for `bigip-metrics-exporter` | Image is not on Docker Hub. Use `./scripts/k8s-deploy.sh local` after build+load, or `IMAGE=<registry>/... ./scripts/k8s-deploy.sh minimal` after push |
+| `ErrImagePull` / `authorization failed` for `bigip-telemetry-exporter` | Image is not on Docker Hub. Use `./scripts/k8s-deploy.sh local` after build+load, or `IMAGE=<registry>/... ./scripts/k8s-deploy.sh minimal` after push |
 | Backend `ImagePullBackOff` | Same as above; `kubectl describe pod` → Events |
 | No metrics in Prometheus | `kubectl logs deploy/otel-collector`; export started in UI? |
 | OTLP errors in backend logs | Service `otel-collector` endpoints; port 4318 |

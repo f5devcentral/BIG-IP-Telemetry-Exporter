@@ -31,8 +31,8 @@ if [[ "${OVERLAY}" == "minimal" || "${OVERLAY}" == "example" ]]; then
     echo "" >&2
     echo "The backend image is NOT on Docker Hub. Build, push, then deploy:" >&2
     echo "  ./scripts/k8s-build-image.sh" >&2
-    echo "  export IMAGE=ghcr.io/<you>/bigip-metrics-exporter:1.0.0" >&2
-    echo "  docker tag bigip-metrics-exporter:latest \"\${IMAGE}\"" >&2
+    echo "  export IMAGE=ghcr.io/<you>/bigip-telemetry-exporter:1.0.0" >&2
+    echo "  docker tag bigip-telemetry-exporter:latest \"\${IMAGE}\"" >&2
     echo "  docker push \"\${IMAGE}\"" >&2
     echo "  IMAGE=\"\${IMAGE}\" ./scripts/k8s-deploy.sh ${OVERLAY}" >&2
     echo "" >&2
@@ -47,22 +47,22 @@ kubectl apply -k "${KUSTOMIZE_PATH}"
 
 if [[ -n "${IMAGE}" ]]; then
   echo "Setting deployment image to ${IMAGE}"
-  kubectl -n bigip-metrics set image deployment/bigip-metrics-backend "backend=${IMAGE}"
+  kubectl -n bigip-telemetry set image deployment/bigip-telemetry-backend "backend=${IMAGE}"
 fi
 
 echo ""
 echo "Waiting for rollouts..."
-kubectl -n bigip-metrics rollout status deployment/otel-collector --timeout=120s
-kubectl -n bigip-metrics rollout status deployment/prometheus --timeout=120s
-kubectl -n bigip-metrics rollout status deployment/bigip-metrics-backend --timeout=120s
+kubectl -n bigip-telemetry rollout status deployment/otel-collector --timeout=120s
+kubectl -n bigip-telemetry rollout status deployment/prometheus --timeout=120s
+kubectl -n bigip-telemetry rollout status deployment/bigip-telemetry-backend --timeout=120s
 echo ""
 echo "Pods:"
-kubectl -n bigip-metrics get pods
+kubectl -n bigip-telemetry get pods
 HOST_IP="$("${ROOT}/scripts/host-ip.sh" 2>/dev/null || echo "<HOST-IP>")"
 echo ""
 echo "Port-forward (bind all interfaces so other machines can connect):"
-echo "  kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/bigip-metrics-backend 8001:8000"
-echo "  kubectl -n bigip-metrics port-forward --address 0.0.0.0 svc/prometheus 9090:9090"
+echo "  kubectl -n bigip-telemetry port-forward --address 0.0.0.0 svc/bigip-telemetry-backend 8001:8000"
+echo "  kubectl -n bigip-telemetry port-forward --address 0.0.0.0 svc/prometheus 9090:9090"
 echo ""
 echo "  UI:         http://${HOST_IP}:8001"
 echo "  Prometheus: http://${HOST_IP}:9090"

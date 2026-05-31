@@ -27,13 +27,13 @@ DEFAULT_PARTITION = "Common"
 DEFAULT_TENANT = "Common"
 # AS3 Common tenant only allows a child application named "Shared".
 DEFAULT_APPLICATION = "Shared"
-DEFAULT_DECLARATION_ID = "bigip_metrics_exporter_log_profiles"
+DEFAULT_DECLARATION_ID = "bigip_telemetry_exporter_log_profiles"
 
-DEFAULT_REQUEST_LOG_NAME = "bigip-metrics-requestlog"
-DEFAULT_ASM_LOG_NAME = "bigip-metrics-asm-log"
-DEFAULT_AFM_LOG_NAME = "bigip-metrics-afm-log"
-DEFAULT_HTTP_ANALYTICS_NAME = "bigip-metrics-http-analytics"
-DEFAULT_TCP_ANALYTICS_NAME = "bigip-metrics-tcp-analytics"
+DEFAULT_REQUEST_LOG_NAME = "bigip-telemetry-requestlog"
+DEFAULT_ASM_LOG_NAME = "bigip-telemetry-asm-log"
+DEFAULT_AFM_LOG_NAME = "bigip-telemetry-afm-log"
+DEFAULT_HTTP_ANALYTICS_NAME = "bigip-telemetry-http-analytics"
+DEFAULT_TCP_ANALYTICS_NAME = "bigip-telemetry-tcp-analytics"
 
 # Required for ASM remoteStorage "remote" (predefined format cannot have empty fields).
 _ASM_REMOTE_LOG_FIELDS = [
@@ -78,7 +78,7 @@ def _application_key(tenant_name: str) -> str:
     """Return the Application key under a tenant (Common requires Shared)."""
     if tenant_name == "Common":
         return "Shared"
-    return os.environ.get("BIGIP_AS3_APPLICATION", "bigip_metrics_exporter").strip()
+    return os.environ.get("BIGIP_AS3_APPLICATION", "bigip_telemetry_exporter").strip()
 
 
 def _declaration_id() -> str:
@@ -321,7 +321,7 @@ def build_log_profiles_declaration(
         "class": "ADC",
         "schemaVersion": schema_version_for_declaration(client),
         "id": _declaration_id(),
-        "remark": "BIG-IP Metrics Exporter remote log and AVR profiles",
+        "remark": "BIG-IP Telemetry Exporter remote log and AVR profiles",
         tenant_name: {
             "class": "Tenant",
             app_key: {

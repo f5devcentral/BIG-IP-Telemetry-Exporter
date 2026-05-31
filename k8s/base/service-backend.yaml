@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: bigip-metrics-backend
+  name: bigip-telemetry-backend
   labels:
-    app.kubernetes.io/name: bigip-metrics-backend
+    app.kubernetes.io/name: bigip-telemetry-backend
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: bigip-metrics-backend
+    app.kubernetes.io/name: bigip-telemetry-backend
   ports:
     - name: http
       port: 8000

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the BIG-IP Metrics Exporter API."""
+"""Run the BIG-IP Telemetry Exporter API."""
 
 import os
 

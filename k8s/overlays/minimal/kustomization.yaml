@@ -8,6 +8,6 @@ patches:
   - path: delete-ingress.yaml
 
 images:
-  - name: bigip-metrics-exporter
-    newName: bigip-metrics-exporter
+  - name: bigip-telemetry-exporter
+    newName: bigip-telemetry-exporter
     newTag: latest

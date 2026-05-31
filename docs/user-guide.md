@@ -53,11 +53,11 @@ On connect, the exporter verifies AS3 (`GET /mgmt/shared/appsvcs/info`), install
 
 | Profile | Default name | Attach on virtual server | AS3 class |
 |---------|--------------|--------------------------|-----------|
-| LTM request-log | `/Common/bigip-metrics-requestlog` | **Request Logging** | `Traffic_Log_Profile` |
-| ASM security log | `/Common/bigip-metrics-asm-log` | **Security Log Profile** (Application Security) | `Security_Log_Profile` (local, `requestType` all) |
-| AFM security log | `/Common/bigip-metrics-afm-log` | **Security Log Profile** (Network Firewall) | `Security_Log_Profile` (`local-db-publisher`) |
-| AVR HTTP analytics | `/Common/bigip-metrics-http-analytics` | HTTP **Analytics** profile | `Analytics_Profile` |
-| AVR TCP analytics | `/Common/bigip-metrics-tcp-analytics` | TCP **Analytics** profile | `Analytics_TCP_Profile` |
+| LTM request-log | `/Common/bigip-telemetry-requestlog` | **Request Logging** | `Traffic_Log_Profile` |
+| ASM security log | `/Common/bigip-telemetry-asm-log` | **Security Log Profile** (Application Security) | `Security_Log_Profile` (local, `requestType` all) |
+| AFM security log | `/Common/bigip-telemetry-afm-log` | **Security Log Profile** (Network Firewall) | `Security_Log_Profile` (`local-db-publisher`) |
+| AVR HTTP analytics | `/Common/bigip-telemetry-http-analytics` | HTTP **Analytics** profile | `Analytics_Profile` |
+| AVR TCP analytics | `/Common/bigip-telemetry-tcp-analytics` | TCP **Analytics** profile | `Analytics_TCP_Profile` |
 
 Profiles for unprovisioned modules (ASM, AFM, AVR) are omitted with no connect warning.
 
@@ -104,7 +104,7 @@ Generated file: `otel-collector/generated-config.yaml`
 
 | Field | Ubuntu | Kubernetes |
 |-------|--------|------------|
-| OTLP HTTP endpoint | `http://127.0.0.1:4318` | `http://otel-collector.bigip-metrics.svc.cluster.local:4318` |
+| OTLP HTTP endpoint | `http://127.0.0.1:4318` | `http://otel-collector.bigip-telemetry.svc.cluster.local:4318` |
 | Poll interval | Seconds between full cycles (default 30) | Same |
 
 Ensure at least one device is **checked** in the connections list, then click **Start export**.

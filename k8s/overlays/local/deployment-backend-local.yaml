@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bigip-metrics-backend
+  name: bigip-telemetry-backend
 spec:
   template:
     spec:

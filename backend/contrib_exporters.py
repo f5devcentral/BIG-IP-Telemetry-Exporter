@@ -174,7 +174,7 @@ def _build_otlp_grpc(params: dict[str, Any]) -> dict[str, Any]:
 def _build_prometheus(params: dict[str, Any]) -> dict[str, Any]:
     return {
         "endpoint": str(_p(params, "endpoint", "0.0.0.0:8889")),
-        "const_labels": {"source": "bigip-metrics-exporter"},
+        "const_labels": {"source": "bigip-telemetry-exporter"},
     }
 
 
@@ -190,7 +190,7 @@ def _build_file(params: dict[str, Any]) -> dict[str, Any]:
     default_path = (
         "/tmp/bigip-logs.json"
         if params.get("_pipeline") == "logs"
-        else "/tmp/bigip-metrics.json"
+        else "/tmp/bigip-telemetry.json"
     )
     return {
         "path": str(_p(params, "path", default_path)),
@@ -245,7 +245,7 @@ def _build_coralogix(params: dict[str, Any]) -> dict[str, Any]:
     return {
         "domain": str(_p(params, "domain", "coralogix.com")),
         "private_key": str(_p(params, "private_key", "")),
-        "application_name": str(_p(params, "application_name", "bigip-metrics")),
+        "application_name": str(_p(params, "application_name", "bigip-telemetry")),
         "subsystem_name": str(_p(params, "subsystem_name", "exporter")),
     }
 
@@ -309,7 +309,17 @@ def _build_logzio(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_sumologic(params: dict[str, Any]) -> dict[str, Any]:
-    return {"endpoint": str(_p(params, "endpoint", ""))}
+    endpoint = str(_p(params, "endpoint", "")).strip()
+    if not endpoint:
+        raise ValueError(
+            "Sumo Logic exporter requires an HTTP Source URL "
+            "(Sumo Logic → Manage Data → Collection → Sources → HTTP Logs). "
+            "Paste the full https://collectors.../receiver/v1/http/... URL."
+        )
+    return {
+        "endpoint": endpoint,
+        "log_format": "otlp",
+    }
 
 
 def _build_mezmo(params: dict[str, Any]) -> dict[str, Any]:
@@ -480,7 +490,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
             category="Core",
             doc_folder="fileexporter",
             signals=_SIGNAL_BOTH,
-            fields=(FieldSpec("path", "File path", default="/tmp/bigip-metrics.json"),),
+            fields=(FieldSpec("path", "File path", default="/tmp/bigip-telemetry.json"),),
             build=_build_file,
         ),
         ExporterSpec(
@@ -561,7 +571,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
             fields=(
                 FieldSpec("private_key", "Private key", field_type="password", required=True),
                 FieldSpec("domain", "Domain", default="coralogix.com"),
-                FieldSpec("application_name", "Application", default="bigip-metrics"),
+                FieldSpec("application_name", "Application", default="bigip-telemetry"),
                 FieldSpec("subsystem_name", "Subsystem", default="exporter"),
             ),
             build=_build_coralogix,
@@ -726,11 +736,18 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
             type="sumologic",
             component="sumologic",
             label="Sumo Logic",
-            description="Send telemetry to Sumo Logic.",
+            description="Send telemetry to Sumo Logic via an HTTP Source URL.",
             category="Observability",
             doc_folder="sumologicexporter",
             signals=_SIGNAL_BOTH,
-            fields=(FieldSpec("endpoint", "HTTP endpoint", required=True),),
+            fields=(
+                FieldSpec(
+                    "endpoint",
+                    "HTTP Source URL",
+                    required=True,
+                    placeholder="https://collectors.sumologic.com/receiver/v1/http/...",
+                ),
+            ),
             build=_build_sumologic,
         ),
         ExporterSpec(
