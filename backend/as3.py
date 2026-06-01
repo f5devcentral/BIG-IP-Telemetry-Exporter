@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
 from typing import Any
 
-from backend.bigip_client import BigIPClient, BigIPError
+from backend.bigip_client import BigIPClient, BigIPError, format_icontrol_error
 from backend.bigip_resource import is_not_found, path_from_self_link
 
 AS3_INFO_PATH = "/mgmt/shared/appsvcs/info"
@@ -117,40 +118,27 @@ def ensure_as3_available(client: BigIPClient) -> dict[str, Any]:
     return info
 
 
-def _collect_declaration_errors(response: Any) -> list[str]:
-    if not isinstance(response, dict):
-        return []
-    errors: list[str] = []
-    top_errors = response.get("errors")
-    if isinstance(top_errors, list):
-        for item in top_errors:
-            if isinstance(item, dict):
-                errors.append(str(item.get("message") or item))
-            else:
-                errors.append(str(item))
+def _declaration_failed(response: dict[str, Any]) -> bool:
+    if response.get("message") in ("declaration is invalid", "declaration failed"):
+        return True
+    errors = response.get("errors")
+    if isinstance(errors, list) and errors:
+        return True
     results = response.get("results")
     if isinstance(results, list):
         for entry in results:
-            if not isinstance(entry, dict):
-                continue
-            code = entry.get("code")
-            if code is not None and int(code) >= 400:
-                errors.append(str(entry.get("message") or entry))
-            entry_errors = entry.get("errors")
-            if isinstance(entry_errors, list):
-                for err in entry_errors:
-                    errors.append(str(err))
-    return errors
+            if isinstance(entry, dict) and int(entry.get("code", 200)) >= 400:
+                return True
+    return False
 
 
 def post_declaration(client: BigIPClient, declaration: dict[str, Any]) -> dict[str, Any]:
     """POST an AS3 declaration (deploy)."""
     response = client.post(AS3_DECLARE_PATH, json_body=declaration)
-    errors = _collect_declaration_errors(response)
-    if errors:
-        raise BigIPError("; ".join(errors[:5]))
     if not isinstance(response, dict):
         return {}
+    if _declaration_failed(response):
+        raise BigIPError(format_icontrol_error(422, json.dumps(response)))
     return response
 
 

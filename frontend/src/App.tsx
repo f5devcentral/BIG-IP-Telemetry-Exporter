@@ -190,6 +190,7 @@ export default function App() {
   const [metricExporters, setMetricExporters] = useState<ExporterConfig[]>(DEFAULT_METRIC_EXPORTERS);
   const [logExporters, setLogExporters] = useState<ExporterConfig[]>(DEFAULT_LOG_EXPORTERS);
   const [collectorYaml, setCollectorYaml] = useState("");
+  const [collectorActionStatus, setCollectorActionStatus] = useState<string | null>(null);
 
   const [pollInterval, setPollInterval] = useState(30);
   const [otlpEndpoint, setOtlpEndpoint] = useState("http://127.0.0.1:4318");
@@ -419,6 +420,7 @@ export default function App() {
   const applyCollector = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setCollectorActionStatus(null);
     try {
       const r = await apiFetch("/api/collector/config", {
         method: "POST",
@@ -431,8 +433,30 @@ export default function App() {
           export_logs: collectorExportModes.logs || logExporters.some((e) => e.enabled),
         }),
       });
-      const data = await readJson<{ yaml: string; restart_command: string }>(r);
+      const data = await readJson<{
+        yaml: string;
+        collector_restart?: {
+          attempted?: boolean;
+          ok?: boolean;
+          message?: string;
+          error?: string;
+          manual_hint?: string;
+          skipped?: boolean;
+        };
+      }>(r);
       setCollectorYaml(data.yaml);
+      const restart = data.collector_restart;
+      if (restart?.ok && restart.message) {
+        setCollectorActionStatus(restart.message);
+      } else if (restart?.attempted && restart.error) {
+        setCollectorActionStatus(
+          `Config saved, but collector restart failed: ${restart.error}${
+            restart.manual_hint ? ` Try: ${restart.manual_hint}` : ""
+          }`,
+        );
+      } else if (restart?.skipped && restart.manual_hint) {
+        setCollectorActionStatus(`Config saved. Restart manually: ${restart.manual_hint}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1139,9 +1163,12 @@ export default function App() {
               : collectorExportModes.logs
                 ? "logs only"
                 : "none"}
-          ). After applying, restart the collector:{" "}
-          <code>docker compose restart otel-collector</code>
+          ). Applying config writes <code>otel-collector/generated-config.yaml</code> and
+          automatically restarts the collector when docker or kubectl is available.
         </p>
+        {collectorActionStatus && (
+          <p className="muted">{collectorActionStatus}</p>
+        )}
         {collectorExportModes.metrics &&
           renderExporterSection(
             "metrics",

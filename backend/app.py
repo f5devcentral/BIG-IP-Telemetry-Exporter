@@ -32,7 +32,8 @@ from backend.collector_config import (
     list_exporter_catalog,
     write_collector_config,
 )
-from backend.log_forwarding import runtime_log_config, syslog_host
+from backend.collector_ops import auto_restart_enabled, control_status as collector_control_status, restart_collector, restart_hint
+from backend.log_forwarding import resolve_syslog_host, runtime_log_config
 from backend.metrics_extractor import extract_metrics
 from backend.otel_export import MetricsExportLoop, OTLPMetricsPusher
 from backend.prometheus_ops import control_status, reload_prometheus, restart_prometheus
@@ -320,7 +321,7 @@ def runtime_config(request: Request) -> dict[str, str]:
         "collector_metrics": urls["collector_metrics"],
         "collector_config_path": str(GENERATED_CONFIG_PATH),
         "access_host": _browser_host(request),
-        **runtime_log_config(),
+        **runtime_log_config(browser_host=_browser_host(request)),
     }
 
 
@@ -357,7 +358,7 @@ def list_devices() -> dict[str, Any]:
 
 
 @app.post("/api/connect", response_model=ConnectResponse)
-def connect(body: ConnectBody) -> ConnectResponse:
+def connect(body: ConnectBody, request: Request) -> ConnectResponse:
     if not body.export_metrics and not body.export_logs:
         raise HTTPException(
             status_code=400,
@@ -409,7 +410,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
         log_hsl_target: str | None = None
         if body.export_logs:
             try:
-                profiles = ensure_log_profiles_via_as3(client, log_host=syslog_host())
+                log_host = resolve_syslog_host(browser_host=_browser_host(request))
+                profiles = ensure_log_profiles_via_as3(client, log_host=log_host)
                 request_log_profile = profiles.request_log_profile
                 request_log_profile_created = profiles.request_log_profile_created
                 asm_log_profile = profiles.asm_log_profile
@@ -422,6 +424,8 @@ def connect(body: ConnectBody) -> ConnectResponse:
                 tcp_analytics_profile_created = profiles.tcp_analytics_profile_created
                 log_syslog_target = profiles.log_syslog_target
                 log_hsl_target = profiles.log_hsl_target
+            except ValueError as exc:
+                warning = _append_warning(warning, str(exc))
             except BigIPError as exc:
                 warning = _append_warning(
                     warning,
@@ -581,10 +585,28 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    restart = os.environ.get(
-        "COLLECTOR_RESTART_HINT",
-        "docker compose restart otel-collector",
-    )
+
+    restart_info: dict[str, Any] = {"attempted": False}
+    if auto_restart_enabled():
+        restart_info["attempted"] = True
+        try:
+            restart_info.update(restart_collector(config_path=path))
+        except BigIPError as exc:
+            mode = collector_control_status()["restart_mode"]
+            restart_info.update(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "manual_hint": restart_hint(mode),
+                },
+            )
+    else:
+        restart_info["skipped"] = True
+        restart_info["manual_hint"] = os.environ.get(
+            "COLLECTOR_RESTART_HINT",
+            restart_hint(collector_control_status()["restart_mode"]),
+        )
+
     return {
         "ok": True,
         "path": str(path),
@@ -593,13 +615,17 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
         "log_exporters": _collector_log_exporters,
         "export_metrics": _collector_export_metrics,
         "export_logs": _collector_export_logs,
-        "restart_command": restart,
-        "k8s_apply_hint": (
-            "kubectl -n bigip-telemetry create configmap otel-collector-config "
-            "--from-file=config.yaml=<path> --dry-run=client -o yaml | kubectl apply -f - "
-            "&& kubectl -n bigip-telemetry rollout restart deployment/otel-collector"
-        ),
+        "collector_restart": restart_info,
+        "restart_command": restart_info.get("command")
+        or restart_info.get("manual_hint")
+        or restart_hint(collector_control_status()["restart_mode"]),
+        "k8s_apply_hint": restart_hint("kubernetes"),
     }
+
+
+@app.get("/api/collector/control")
+def collector_control() -> dict[str, Any]:
+    return collector_control_status()
 
 
 @app.get("/api/export/status")

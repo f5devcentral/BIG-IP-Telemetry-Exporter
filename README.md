@@ -131,6 +131,9 @@ Credentials stay in the API process memory (not written to disk by default). Res
 | `BIGIP_ASM_LOG_PROFILE_NAME` | `bigip-telemetry-asm-log` | ASM security log profile name |
 | `BIGIP_AFM_LOG_PROFILE_NAME` | `bigip-telemetry-afm-log` | AFM security log profile name |
 | `BIGIP_LOG_PROFILE_PARTITION` | `Common` | Partition for all exporter-managed profiles |
+| `BIGIP_LOG_SYSLOG_HOST` | Auto-detected LAN IP | IP/hostname BIG-IP uses for remote log pools (must not be loopback) |
+| `BIGIP_LOG_SYSLOG_PORT` | `5140` | Collector syslog receiver (ASM/AFM) |
+| `BIGIP_LOG_HSL_PORT` | `5141` | Collector tcplog receiver (LTM request logging) |
 | `BIGIP_REQUEST_LOG_AUTO_CREATE` | `true` | Set `false` to skip LTM profile on connect |
 | `BIGIP_ASM_LOG_AUTO_CREATE` | `true` | Set `false` to skip ASM profile on connect |
 | `BIGIP_AFM_LOG_AUTO_CREATE` | `true` | Set `false` to skip AFM profile on connect |
@@ -161,8 +164,8 @@ Defaults pre-select stats endpoints. Prefer `.../stats` paths for time-series st
 Use **OpenTelemetry Collector exporters** to add sinks beyond the built-in Prometheus exporter on port **8889** (always used for local validation).
 
 1. Add or enable exporters (`otlp_http`, `otlp_grpc`, `debug`, `file`, etc.).
-2. **Apply collector config** — writes `otel-collector/generated-config.yaml`.
-3. Restart the collector so it picks up the file:
+2. **Apply collector config** — writes `otel-collector/generated-config.yaml` and automatically restarts the collector (docker compose or kubectl when available).
+3. If auto-restart fails, restart manually:
 
    | Environment | Command |
    |-------------|---------|
@@ -394,7 +397,7 @@ Follow the **[User guide](#user-guide)**. Quick checklist:
 1. Open **`http://<HOST-IP>:8001`**.
 2. **BIG-IP connections** — fill host, username, and password, then **Connect**; use **Add BIG-IP** for more; confirm devices in the status bar and check which to export.
 3. **API endpoints** — select stats paths (defaults are pre-selected).
-4. **Collector exporters** (optional) → **Apply collector config** → `docker compose restart otel-collector`.
+4. **Collector exporters** (optional) → **Apply collector config** (auto-restarts collector).
 5. **Export** — OTLP `http://127.0.0.1:4318` → **Start export**.
 6. **Prometheus** — `http://<HOST-IP>:9090`, targets up, query `bigip_*` (use `bigip_host` label when multiple devices).
 
@@ -642,9 +645,9 @@ The UI configures exporters from the [OpenTelemetry Collector Contrib](https://g
 
 A Prometheus exporter on **:8889** is always added for local validation (in addition to exporters you enable).
 
-After **Apply collector config**, restart the collector:
+After **Apply collector config**, the API restarts the collector when docker or kubectl is available. Set `COLLECTOR_AUTO_RESTART=false` to disable.
 
-- **Ubuntu:** `docker compose restart otel-collector`
+- **Ubuntu (manual fallback):** `docker compose restart otel-collector`
 - **Kubernetes:** `./scripts/k8s-apply-collector-config.sh`
 
 Generated config file: `otel-collector/generated-config.yaml`
@@ -662,6 +665,10 @@ Catalog API: `GET /api/exporters/catalog` (categories, field schemas, links to [
 | `PROMETHEUS_RELOAD_WIPE_CMD` | *(unset)* | Custom shell command to wipe TSDB before reload |
 | `PROMETHEUS_RESTART_MODE` | `docker` / `kubernetes` / auto | How reload/restart recreates Prometheus |
 | `PROMETHEUS_K8S_NAMESPACE` | `bigip-telemetry` | Namespace for `kubectl rollout restart` |
+| `COLLECTOR_AUTO_RESTART` | `true` | Set `false` to write config without restarting the collector |
+| `COLLECTOR_RESTART_CMD` | _(unset)_ | Custom restart command (overrides auto-detect) |
+| `COLLECTOR_RESTART_MODE` | auto | `docker`, `kubernetes`, or `none` |
+| `COLLECTOR_HEALTH_URL` | `http://127.0.0.1:13133` | Health check after restart |
 | `COLLECTOR_CONFIG_PATH` | `otel-collector/generated-config.yaml` | Path written by **Apply collector config** |
 
 ## Repository

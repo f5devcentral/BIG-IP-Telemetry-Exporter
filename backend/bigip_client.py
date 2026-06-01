@@ -14,6 +14,68 @@ class BigIPError(Exception):
     pass
 
 
+def format_icontrol_error(status_code: int, body: str, *, max_len: int = 800) -> str:
+    """Extract readable detail from BIG-IP JSON error bodies (incl. AS3 declare)."""
+    text = (body or "").strip()
+    if not text:
+        return f"HTTP {status_code}"
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return f"HTTP {status_code}: {text[:max_len]}"
+
+    if not isinstance(data, dict):
+        return f"HTTP {status_code}: {text[:max_len]}"
+
+    parts: list[str] = []
+    top_message = data.get("message")
+    if top_message and str(top_message) not in parts:
+        parts.append(str(top_message))
+
+    top_errors = data.get("errors")
+    if isinstance(top_errors, list):
+        for item in top_errors:
+            parts.append(str(item))
+
+    results = data.get("results")
+    if isinstance(results, list):
+        for entry in results:
+            if not isinstance(entry, dict):
+                continue
+            code = entry.get("code")
+            if code is not None and int(code) < 400:
+                continue
+            detail = entry.get("response") or entry.get("message")
+            if not detail:
+                continue
+            prefix_parts = [
+                str(entry.get("tenant") or "").strip(),
+                str(entry.get("host") or "").strip(),
+            ]
+            prefix = " ".join(p for p in prefix_parts if p and p != "localhost")
+            if prefix:
+                parts.append(f"{prefix}: {detail}")
+            else:
+                parts.append(str(detail))
+            entry_errors = entry.get("errors")
+            if isinstance(entry_errors, list):
+                for err in entry_errors:
+                    parts.append(str(err))
+
+    if parts:
+        # De-dupe while preserving order.
+        seen: set[str] = set()
+        unique: list[str] = []
+        for part in parts:
+            if part not in seen:
+                seen.add(part)
+                unique.append(part)
+        return "; ".join(unique)[:max_len]
+
+    return f"HTTP {status_code}: {text[:max_len]}"
+
+
 class BigIPClient:
     def __init__(
         self,
@@ -181,7 +243,7 @@ class BigIPClient:
             r = send()
         if r.status_code >= 400:
             raise BigIPError(
-                f"{method} {endpoint} failed ({r.status_code}): {r.text[:400]}",
+                format_icontrol_error(r.status_code, r.text),
             )
         return self._parse_json_response(endpoint, r)
 
@@ -227,7 +289,7 @@ class BigIPClient:
             r = send()
         if r.status_code >= 400:
             raise BigIPError(
-                f"POST {endpoint} failed ({r.status_code}): {r.text[:400]}",
+                format_icontrol_error(r.status_code, r.text),
             )
         if not r.text.strip():
             return {}

@@ -85,8 +85,8 @@ The stack always exposes a Prometheus exporter on port **8889** for validation. 
 
 1. In **OpenTelemetry Collector exporters**, choose a type (grouped by category) and fill in its fields.
 2. For exporters not in the list, use **Contrib exporter (custom YAML)**: pick the collector component name (e.g. `loadbalancing`, `zipkin`) and paste the YAML settings from upstream docs.
-3. Click **Apply collector config**.
-4. Restart the collector:
+3. Click **Apply collector config** — writes `otel-collector/generated-config.yaml` and restarts the collector automatically (docker compose or kubectl when available).
+4. If auto-restart is unavailable, restart manually:
 
 ```bash
 # Ubuntu

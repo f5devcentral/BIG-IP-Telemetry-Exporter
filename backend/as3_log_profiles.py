@@ -15,10 +15,8 @@ from backend.log_forwarding import (
     LOG_PUBLISHER_NAME,
     LOG_SYSLOG_DEST_NAME,
     hsl_port,
-    syslog_host,
+    is_loopback_host,
     syslog_port,
-    syslog_target,
-    hsl_target,
 )
 from backend.log_templates import REQUEST_EVENT_TEMPLATE, RESPONSE_EVENT_TEMPLATE
 from backend.module_provision import is_module_provisioned
@@ -321,7 +319,7 @@ def build_log_profiles_declaration(
         "class": "ADC",
         "schemaVersion": schema_version_for_declaration(client),
         "id": _declaration_id(),
-        "remark": "BIG-IP Telemetry Exporter remote log and AVR profiles",
+        "remark": "BIG-IP Telemetry Exporter profiles",
         tenant_name: {
             "class": "Tenant",
             app_key: {
@@ -351,7 +349,13 @@ def ensure_log_profiles_via_as3(
     ensure_as3_available(client)
     flags = _provision_flags(client)
     part = _partition()
-    host = (log_host or syslog_host()).strip()
+    host = (log_host or "").strip()
+    if not host:
+        raise ValueError("Log collector host is required for AS3 remote logging profiles.")
+    if is_loopback_host(host):
+        raise ValueError(
+            f"Log collector host {host!r} is loopback; BIG-IP AS3 requires a reachable IP or hostname."
+        )
 
     include_ltm = flags["ltm"] and _ltm_enabled()
     include_asm = flags["asm"] and _asm_enabled()
@@ -371,7 +375,24 @@ def ensure_log_profiles_via_as3(
         include_http_analytics=include_http,
         include_tcp_analytics=include_tcp,
     )
-    post_declaration(client, declaration)
+    try:
+        post_declaration(client, declaration)
+    except BigIPError:
+        if include_http or include_tcp:
+            declaration = build_log_profiles_declaration(
+                client,
+                log_host=host,
+                include_ltm=include_ltm,
+                include_asm=include_asm,
+                include_afm=include_afm,
+                include_http_analytics=False,
+                include_tcp_analytics=False,
+            )
+            post_declaration(client, declaration)
+            include_http = False
+            include_tcp = False
+        else:
+            raise
 
     return LogProfilesResult(
         request_log_profile=_full_name(part, _request_log_name()) if include_ltm else None,
@@ -384,6 +405,6 @@ def ensure_log_profiles_via_as3(
         http_analytics_profile_created=None,
         tcp_analytics_profile=_full_name(part, _tcp_analytics_name()) if include_tcp else None,
         tcp_analytics_profile_created=None,
-        log_syslog_target=syslog_target() if include_asm or include_afm else None,
-        log_hsl_target=hsl_target() if include_ltm else None,
+        log_syslog_target=f"{host}:{syslog_port()}" if include_asm or include_afm else None,
+        log_hsl_target=f"{host}:{hsl_port()}" if include_ltm else None,
     )

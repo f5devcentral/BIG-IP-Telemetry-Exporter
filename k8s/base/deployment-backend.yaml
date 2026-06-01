@@ -38,6 +38,10 @@ spec:
               value: /tmp/collector-config.yaml
             - name: COLLECTOR_RESTART_HINT
               value: kubectl -n bigip-telemetry rollout restart deployment/otel-collector
+            - name: COLLECTOR_RESTART_MODE
+              value: kubernetes
+            - name: COLLECTOR_HEALTH_URL
+              value: http://otel-collector.bigip-telemetry.svc.cluster.local:13133
             - name: PROMETHEUS_RESTART_MODE
               value: kubernetes
             - name: PROMETHEUS_K8S_NAMESPACE
