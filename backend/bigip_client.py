@@ -265,35 +265,54 @@ class BigIPClient:
         data: bytes,
         *,
         content_type: str = "application/octet-stream",
+        chunk_size: int = 512 * 1024,
     ) -> Any:
-        """Upload binary content (e.g. RPM) to a file-transfer uploads URI."""
+        """Upload binary content to a file-transfer uploads URI (chunked with Content-Range)."""
+        if not data:
+            raise BigIPError("Cannot upload empty file")
         if not self._token:
             self.login()
         url = self._url(endpoint)
+        total = len(data)
+        upload_timeout = max(self.timeout, 600)
 
-        def send() -> requests.Response:
+        def post_chunk(start: int, end: int, chunk: bytes) -> requests.Response:
+            headers = {
+                "Content-Type": content_type,
+                # F5 expects start-end/total without a "bytes" unit prefix.
+                "Content-Range": f"{start}-{end}/{total}",
+                "Content-Length": str(len(chunk)),
+            }
             try:
                 return self._session.post(
                     url,
-                    data=data,
+                    data=chunk,
                     verify=self.verify_tls,
-                    timeout=max(self.timeout, 120),
-                    headers={"Content-Type": content_type},
+                    timeout=upload_timeout,
+                    headers=headers,
                 )
             except requests.RequestException as exc:
                 raise BigIPError(f"POST {endpoint} failed: {exc}") from exc
 
-        r = send()
-        if r.status_code == 401:
-            self.login()
-            r = send()
-        if r.status_code >= 400:
-            raise BigIPError(
-                format_icontrol_error(r.status_code, r.text),
-            )
-        if not r.text.strip():
+        offset = 0
+        last_response: requests.Response | None = None
+        while offset < total:
+            end = min(offset + chunk_size, total) - 1
+            chunk = data[offset : end + 1]
+            response = post_chunk(offset, end, chunk)
+            if response.status_code == 401:
+                self.login()
+                response = post_chunk(offset, end, chunk)
+            if response.status_code >= 400:
+                raise BigIPError(
+                    format_icontrol_error(response.status_code, response.text),
+                )
+            last_response = response
+            offset = end + 1
+
+        if last_response is None or not last_response.text.strip():
             return {}
-        return self._parse_json_response(endpoint, r)
+        return self._parse_json_response(endpoint, last_response)
 
     def logout(self) -> None:
         if not self._token:
