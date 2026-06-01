@@ -20,7 +20,7 @@ After upgrading the repo, rebuild the UI when not using Vite dev mode: `cd front
 | **API endpoints** | iControl REST path catalog |
 | **Collector exporters** | OpenTelemetry Collector Contrib sinks |
 | **Export to collector** | OTLP push from the Python backend |
-| **Prometheus validation** | Targets, queries, reload/restart |
+| **Validate metrics** | Targets and example queries |
 
 ## 1. Connect BIG-IP devices
 

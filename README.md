@@ -77,7 +77,7 @@ flowchart TD
 | 2 | **API endpoints** | Choose which `/mgmt/...` paths to poll (stats paths recommended) |
 | 3 | **OpenTelemetry Collector exporters** | Optional extra sinks (remote OTLP, file, debug) |
 | 4 | **Export to collector** | Periodic poll → OTLP HTTP → collector → Prometheus scrape |
-| 5 | **Prometheus validation** | Confirm targets up and query metrics |
+| 5 | **Validate metrics** | Confirm collector exporter is up and query metrics |
 
 ### UI overview
 
@@ -86,7 +86,7 @@ flowchart TD
 | **Connected status bar** (top, when ≥1 device) | Count, chip per device, export selection summary, **Refresh list**, auto-refresh every 45 seconds |
 | **BIG-IP connections** | Full device list with export checkboxes, **Remove**, and the connect form |
 | **Export to collector** | How many devices are selected (`X of Y connected`) |
-| **Prometheus validation** | Links, example queries, reload/restart controls |
+| **Validate metrics** | Links and example queries |
 
 After `git pull`, rebuild the UI if you serve production assets: `cd frontend && npm ci && npm run build`, then restart the API.
 
@@ -253,9 +253,6 @@ On Ubuntu, restart uses the same recreate path as reload wipe. On Kubernetes, th
 | `GET` | `/api/export/status` | Loop status + connected devices |
 | `GET` | `/api/exporters/catalog` | Collector contrib exporter types and form fields |
 | `GET` / `POST` | `/api/collector/config` | Read/write collector YAML |
-| `GET` | `/api/prometheus/control` | Reload/restart availability and hints |
-| `POST` | `/api/prometheus/reload` | Wipe TSDB (default), then `/-/reload` |
-| `POST` | `/api/prometheus/restart` | Recreate Prometheus (docker/k8s) |
 
 ### Common issues (user-facing)
 

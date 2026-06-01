@@ -36,7 +36,6 @@ from backend.collector_ops import auto_restart_enabled, control_status as collec
 from backend.log_forwarding import resolve_syslog_host, runtime_log_config
 from backend.metrics_extractor import extract_metrics
 from backend.otel_export import MetricsExportLoop, OTLPMetricsPusher
-from backend.prometheus_ops import control_status, reload_prometheus, restart_prometheus
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APIS_CSV = REPO_ROOT / "data" / "bigip_apis.csv"
@@ -59,11 +58,8 @@ def _browser_host(request: Request) -> str:
 
 def _browser_urls(request: Request) -> dict[str, str]:
     host = _browser_host(request)
-    prom_port = os.environ.get("PROMETHEUS_BROWSER_PORT", "9090")
     coll_port = os.environ.get("COLLECTOR_METRICS_BROWSER_PORT", "8889")
     return {
-        "prometheus_ui": os.environ.get("PROMETHEUS_UI_URL")
-        or f"http://{host}:{prom_port}",
         "collector_metrics": os.environ.get("COLLECTOR_METRICS_URL")
         or f"http://{host}:{coll_port}/metrics",
     }
@@ -317,7 +313,6 @@ def runtime_config(request: Request) -> dict[str, str]:
     urls = _browser_urls(request)
     return {
         "otlp_endpoint": DEFAULT_OTLP_ENDPOINT,
-        "prometheus_ui": urls["prometheus_ui"],
         "collector_metrics": urls["collector_metrics"],
         "collector_config_path": str(GENERATED_CONFIG_PATH),
         "access_host": _browser_host(request),
@@ -761,38 +756,6 @@ def export_stop() -> dict[str, Any]:
         "hsl_target": None,
     }
     return {"stopped": True}
-
-
-@app.get("/api/validation/prometheus")
-def prometheus_hints(request: Request) -> dict[str, str]:
-    urls = _browser_urls(request)
-    return {
-        "prometheus_ui": urls["prometheus_ui"],
-        "collector_metrics": urls["collector_metrics"],
-        "query_example": "bigip_tm_ltm_virtual_stats",
-        "scrape_job": "otel-collector",
-    }
-
-
-@app.get("/api/prometheus/control")
-def prometheus_control(request: Request) -> dict[str, Any]:
-    return control_status(request_host=_browser_host(request))
-
-
-@app.post("/api/prometheus/reload")
-def prometheus_reload(request: Request) -> dict[str, Any]:
-    try:
-        return reload_prometheus(request_host=_browser_host(request))
-    except BigIPError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/prometheus/restart")
-def prometheus_restart() -> dict[str, Any]:
-    try:
-        return restart_prometheus()
-    except BigIPError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _yaml_dump(cfg: dict[str, Any]) -> str:
