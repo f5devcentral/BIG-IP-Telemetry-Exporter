@@ -36,6 +36,7 @@ from backend.collector_ops import auto_restart_enabled, control_status as collec
 from backend.log_forwarding import resolve_syslog_host, runtime_log_config
 from backend.metrics_extractor import extract_metrics
 from backend.otel_export import MetricsExportLoop, OTLPMetricsPusher
+from backend.system_syslog import ensure_system_syslog_forwarding
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 APIS_CSV = REPO_ROOT / "data" / "bigip_apis.csv"
@@ -85,8 +86,10 @@ class _Session:
     tcp_analytics_profile_created: bool | None = None
     log_syslog_target: str | None = None
     log_hsl_target: str | None = None
+    system_syslog_target: str | None = None
     export_metrics: bool = True
     export_logs: bool = True
+    export_system_logs: bool = False
 
 
 _sessions: dict[str, _Session] = {}
@@ -165,8 +168,10 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
         "tcp_analytics_profile_created": sess.tcp_analytics_profile_created,
         "log_syslog_target": sess.log_syslog_target,
         "log_hsl_target": sess.log_hsl_target,
+        "system_syslog_target": sess.system_syslog_target,
         "export_metrics": sess.export_metrics,
         "export_logs": sess.export_logs,
+        "export_system_logs": sess.export_system_logs,
         "connected_since": sess.created,
     }
 
@@ -212,6 +217,7 @@ class ConnectBody(BaseModel):
     label: str = ""
     export_metrics: bool = True
     export_logs: bool = True
+    export_system_logs: bool = False
 
 
 class ConnectResponse(BaseModel):
@@ -233,6 +239,7 @@ class ConnectResponse(BaseModel):
     log_hsl_target: str | None = None
     export_metrics: bool = True
     export_logs: bool = True
+    export_system_logs: bool = False
 
 
 class ExporterItem(BaseModel):
@@ -403,6 +410,19 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
         tcp_analytics_profile_created: bool | None = None
         log_syslog_target: str | None = None
         log_hsl_target: str | None = None
+        system_syslog_target: str | None = None
+        if body.export_system_logs:
+            try:
+                log_host = resolve_syslog_host(browser_host=_browser_host(request))
+                ensure_system_syslog_forwarding(client, host=log_host, port=5140)
+                system_syslog_target = f"{log_host}:5140"
+            except ValueError as exc:
+                warning = _append_warning(warning, str(exc))
+            except BigIPError as exc:
+                warning = _append_warning(
+                    warning,
+                    f"Connected, but could not enable system log forwarding ({exc}).",
+                )
         if body.export_logs:
             try:
                 log_host = resolve_syslog_host(browser_host=_browser_host(request))
@@ -450,8 +470,10 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             tcp_analytics_profile_created=tcp_analytics_profile_created,
             log_syslog_target=log_syslog_target,
             log_hsl_target=log_hsl_target,
+            system_syslog_target=system_syslog_target,
             export_metrics=body.export_metrics,
             export_logs=body.export_logs,
+            export_system_logs=body.export_system_logs,
         )
         return ConnectResponse(
             session_id=sid,
@@ -472,6 +494,7 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             log_hsl_target=log_hsl_target,
             export_metrics=body.export_metrics,
             export_logs=body.export_logs,
+            export_system_logs=body.export_system_logs,
         )
     except HTTPException:
         raise

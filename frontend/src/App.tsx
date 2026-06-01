@@ -94,8 +94,10 @@ type BigIPDevice = {
   tcp_analytics_profile_created?: boolean | null;
   log_syslog_target?: string | null;
   log_hsl_target?: string | null;
+  system_syslog_target?: string | null;
   export_metrics?: boolean;
   export_logs?: boolean;
+  export_system_logs?: boolean;
   connected_since?: number;
 };
 
@@ -173,6 +175,7 @@ export default function App() {
   const [verifyTls, setVerifyTls] = useState(false);
   const [connectExportMetrics, setConnectExportMetrics] = useState(true);
   const [connectExportLogs, setConnectExportLogs] = useState(true);
+  const [connectExportSystemLogs, setConnectExportSystemLogs] = useState(false);
   const [devices, setDevices] = useState<BigIPDevice[]>([]);
   const [exportDeviceIds, setExportDeviceIds] = useState<Set<string>>(new Set());
 
@@ -306,9 +309,9 @@ export default function App() {
         host.trim() &&
           username.trim() &&
           password &&
-          (connectExportMetrics || connectExportLogs),
+          (connectExportMetrics || connectExportLogs || connectExportSystemLogs),
       ),
-    [host, username, password, connectExportMetrics, connectExportLogs],
+    [host, username, password, connectExportMetrics, connectExportLogs, connectExportSystemLogs],
   );
 
   const connect = useCallback(async () => {
@@ -333,6 +336,7 @@ export default function App() {
           label: deviceLabel.trim(),
           export_metrics: connectExportMetrics,
           export_logs: connectExportLogs,
+          export_system_logs: connectExportSystemLogs,
         }),
       });
       const data = await readJson<{
@@ -363,6 +367,7 @@ export default function App() {
     verifyTls,
     connectExportMetrics,
     connectExportLogs,
+    connectExportSystemLogs,
     refreshDevices,
   ]);
 
@@ -985,6 +990,14 @@ export default function App() {
               onChange={(e) => setConnectExportLogs(e.target.checked)}
             />
             Export logs (remote syslog/HSL profiles)
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={connectExportSystemLogs}
+              onChange={(e) => setConnectExportSystemLogs(e.target.checked)}
+            />
+            Export system logs (syslog-ng, send all to collector :5140)
           </label>
         </div>
         <label className="check">
