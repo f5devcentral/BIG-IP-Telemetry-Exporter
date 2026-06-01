@@ -118,8 +118,18 @@ function exportModeLabel(device: BigIPDevice): string {
   return "None";
 }
 
+function deviceHasModuleLogsActive(device: BigIPDevice): boolean {
+  if (!device.export_logs) return false;
+  return (
+    device.export_ltm_logs !== false ||
+    device.export_asm_logs !== false ||
+    device.export_afm_logs !== false ||
+    device.export_avr_logs !== false
+  );
+}
+
 function deviceExportsLogs(device: BigIPDevice): boolean {
-  return device.export_logs !== false || Boolean(device.export_system_logs);
+  return deviceHasModuleLogsActive(device) || Boolean(device.export_system_logs);
 }
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -347,6 +357,10 @@ export default function App() {
           label: deviceLabel.trim(),
           export_metrics: connectExportMetrics,
           export_logs: connectExportLogs,
+          export_ltm_logs: connectExportLogs,
+          export_asm_logs: connectExportLogs,
+          export_afm_logs: connectExportLogs,
+          export_avr_logs: connectExportLogs,
         }),
       });
       const data = await readJson<{
@@ -969,6 +983,7 @@ export default function App() {
                   </span>
                 </label>
                 {d.warning && <span className="device-list-warn">{d.warning}</span>}
+                {d.export_logs && (
                 <div className="device-list-options">
                   {(d.prov_ltm || d.prov_asm || d.prov_afm || d.prov_avr) && (
                     <div className="device-list-options-row">
@@ -1037,6 +1052,7 @@ export default function App() {
                     </label>
                   </div>
                 </div>
+                )}
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"

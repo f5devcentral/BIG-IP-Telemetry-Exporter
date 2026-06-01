@@ -398,19 +398,17 @@ def list_devices() -> dict[str, Any]:
 
 @app.post("/api/connect", response_model=ConnectResponse)
 def connect(body: ConnectBody, request: Request) -> ConnectResponse:
-    any_logs = bool(
-        body.export_system_logs
-        or body.export_ltm_logs
-        or body.export_asm_logs
-        or body.export_afm_logs
-        or body.export_avr_logs
-        or body.export_logs
-    )
-    if not body.export_metrics and not any_logs:
+    any_logs = bool(body.export_metrics or body.export_system_logs or body.export_logs)
+    if not any_logs:
         raise HTTPException(
             status_code=400,
             detail="Select at least one of export metrics or export logs.",
         )
+    module_logs = bool(body.export_logs)
+    export_ltm_logs = body.export_ltm_logs if module_logs else False
+    export_asm_logs = body.export_asm_logs if module_logs else False
+    export_afm_logs = body.export_afm_logs if module_logs else False
+    export_avr_logs = body.export_avr_logs if module_logs else False
     try:
         existing = _find_session_id_for_host(body.host)
         if existing:
@@ -482,16 +480,16 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
                     warning,
                     f"Connected, but could not enable system log forwarding ({exc}).",
                 )
-        if body.export_logs or body.export_ltm_logs or body.export_asm_logs or body.export_afm_logs or body.export_avr_logs:
+        if module_logs and (export_ltm_logs or export_asm_logs or export_afm_logs or export_avr_logs):
             try:
                 log_host = resolve_syslog_host(browser_host=_browser_host(request))
                 profiles = ensure_log_profiles_via_as3(
                     client,
                     log_host=log_host,
-                    include_ltm=body.export_logs or body.export_ltm_logs,
-                    include_asm=body.export_logs or body.export_asm_logs,
-                    include_afm=body.export_logs or body.export_afm_logs,
-                    include_avr=body.export_logs or body.export_avr_logs,
+                    include_ltm=export_ltm_logs,
+                    include_asm=export_asm_logs,
+                    include_afm=export_afm_logs,
+                    include_avr=export_avr_logs,
                 )
                 request_log_profile = profiles.request_log_profile
                 request_log_profile_created = profiles.request_log_profile_created
@@ -517,14 +515,6 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
         host_norm = _normalize_host(body.host)
         label = (body.label or "").strip() or _display_host(host_norm)
         sid = secrets.token_urlsafe(24)
-        export_logs_compat = bool(
-            body.export_logs
-            or body.export_ltm_logs
-            or body.export_asm_logs
-            or body.export_afm_logs
-            or body.export_avr_logs
-            or body.export_system_logs
-        )
         _sessions[sid] = _Session(
             client=client,
             host=host_norm,
@@ -546,12 +536,12 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             log_hsl_target=log_hsl_target,
             system_syslog_target=system_syslog_target,
             export_metrics=body.export_metrics,
-            export_logs=export_logs_compat,
+            export_logs=module_logs,
             export_system_logs=body.export_system_logs,
-            export_ltm_logs=body.export_ltm_logs,
-            export_asm_logs=body.export_asm_logs,
-            export_afm_logs=body.export_afm_logs,
-            export_avr_logs=body.export_avr_logs,
+            export_ltm_logs=export_ltm_logs,
+            export_asm_logs=export_asm_logs,
+            export_afm_logs=export_afm_logs,
+            export_avr_logs=export_avr_logs,
             prov_ltm=prov_ltm,
             prov_asm=prov_asm,
             prov_afm=prov_afm,
@@ -575,12 +565,12 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             log_syslog_target=log_syslog_target,
             log_hsl_target=log_hsl_target,
             export_metrics=body.export_metrics,
-            export_logs=export_logs_compat,
+            export_logs=module_logs,
             export_system_logs=body.export_system_logs,
-            export_ltm_logs=body.export_ltm_logs,
-            export_asm_logs=body.export_asm_logs,
-            export_afm_logs=body.export_afm_logs,
-            export_avr_logs=body.export_avr_logs,
+            export_ltm_logs=export_ltm_logs,
+            export_asm_logs=export_asm_logs,
+            export_afm_logs=export_afm_logs,
+            export_avr_logs=export_avr_logs,
             prov_ltm=prov_ltm,
             prov_asm=prov_asm,
             prov_afm=prov_afm,
@@ -632,9 +622,6 @@ def update_log_options(session_id: str, body: LogOptionsBody, request: Request) 
     _set("export_afm_logs", body.export_afm_logs)
     _set("export_avr_logs", body.export_avr_logs)
 
-    # Derived compatibility umbrella.
-    s.export_logs = bool(s.export_ltm_logs or s.export_asm_logs or s.export_afm_logs or s.export_avr_logs)
-
     warning: str | None = None
     # Apply system syslog forwarding if enabled.
     if s.export_system_logs:
@@ -645,8 +632,10 @@ def update_log_options(session_id: str, body: LogOptionsBody, request: Request) 
         except (ValueError, BigIPError) as exc:
             warning = _append_warning(warning, f"System log forwarding update failed ({exc}).")
 
-    # Apply AS3 profiles as requested.
-    if s.export_logs:
+    # Apply AS3 profiles as requested (only when module logs were enabled at connect).
+    if s.export_logs and (
+        s.export_ltm_logs or s.export_asm_logs or s.export_afm_logs or s.export_avr_logs
+    ):
         try:
             log_host = resolve_syslog_host(browser_host=_browser_host(request))
             profiles = ensure_log_profiles_via_as3(
@@ -833,7 +822,10 @@ def _resolve_export_sessions(
         label = sess.label or _display_host(sess.host)
         if sess.export_metrics:
             metrics_clients.append((_display_host(sess.host), sid, sess.client))
-        if sess.export_logs or sess.export_system_logs:
+        if sess.export_system_logs or (
+            sess.export_logs
+            and (sess.export_ltm_logs or sess.export_asm_logs or sess.export_afm_logs or sess.export_avr_logs)
+        ):
             log_hosts.append(label)
     if not metrics_clients and not log_hosts:
         raise HTTPException(
