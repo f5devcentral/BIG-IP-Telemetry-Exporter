@@ -167,9 +167,7 @@ async function readJson<T>(r: Response): Promise<T> {
 
 const DEFAULT_METRIC_EXPORTERS: ExporterConfig[] = [];
 
-const DEFAULT_LOG_EXPORTERS: ExporterConfig[] = [
-  { type: "debug", enabled: true, params: { verbosity: "basic" } },
-];
+const DEFAULT_LOG_EXPORTERS: ExporterConfig[] = [];
 
 function resolveTheme(mode: ThemeMode): "light" | "dark" {
   if (mode !== "system") return mode;

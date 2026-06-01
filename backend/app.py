@@ -106,9 +106,7 @@ _export_loop: MetricsExportLoop | None = None
 _pusher: OTLPMetricsPusher | None = None
 _log_export: dict[str, Any] = {"active": False, "hosts": [], "syslog_target": None, "hsl_target": None}
 _collector_metric_exporters: list[dict[str, Any]] = []
-_collector_log_exporters: list[dict[str, Any]] = [
-    {"type": "debug", "enabled": True, "params": {"verbosity": "basic"}},
-]
+_collector_log_exporters: list[dict[str, Any]] = []
 _collector_export_metrics: bool = True
 _collector_export_logs: bool = True
 
