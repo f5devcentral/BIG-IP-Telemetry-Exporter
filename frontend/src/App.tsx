@@ -296,6 +296,11 @@ export default function App() {
     };
   }, [exportSelectedDevices, devices]);
 
+  const showApiEndpoints = useMemo(() => {
+    if (devices.length === 0) return connectExportMetrics;
+    return devices.some((d) => d.export_metrics !== false);
+  }, [devices, connectExportMetrics]);
+
   const moduleFilterOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const a of apis) {
@@ -1138,6 +1143,7 @@ export default function App() {
         </div>
       </section>
 
+      {showApiEndpoints && (
       <section className="card">
         <h2>API endpoints ({filteredApis.length})</h2>
         <p className="muted">
@@ -1223,6 +1229,7 @@ export default function App() {
         </div>
         <p className="muted">{selectedEndpoints.size} endpoint(s) selected</p>
       </section>
+      )}
 
       <section className="card">
         <h2>OpenTelemetry Collector exporters</h2>
