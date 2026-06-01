@@ -98,12 +98,16 @@ type BigIPDevice = {
   export_metrics?: boolean;
   export_logs?: boolean;
   export_system_logs?: boolean;
+  export_ltm_logs?: boolean;
+  export_asm_logs?: boolean;
+  export_afm_logs?: boolean;
+  export_avr_logs?: boolean;
   connected_since?: number;
 };
 
 function exportModeLabel(device: BigIPDevice): string {
   const metrics = device.export_metrics !== false;
-  const logs = device.export_logs !== false;
+  const logs = device.export_logs !== false || device.export_system_logs !== false;
   if (metrics && logs) return "Metrics + logs";
   if (metrics) return "Metrics only";
   if (logs) return "Logs only";
@@ -175,6 +179,10 @@ export default function App() {
   const [verifyTls, setVerifyTls] = useState(false);
   const [connectExportMetrics, setConnectExportMetrics] = useState(true);
   const [connectExportLogs, setConnectExportLogs] = useState(true);
+  const [connectExportLtmLogs, setConnectExportLtmLogs] = useState(true);
+  const [connectExportAsmLogs, setConnectExportAsmLogs] = useState(true);
+  const [connectExportAfmLogs, setConnectExportAfmLogs] = useState(true);
+  const [connectExportAvrLogs, setConnectExportAvrLogs] = useState(true);
   const [connectExportSystemLogs, setConnectExportSystemLogs] = useState(false);
   const [devices, setDevices] = useState<BigIPDevice[]>([]);
   const [exportDeviceIds, setExportDeviceIds] = useState<Set<string>>(new Set());
@@ -311,7 +319,18 @@ export default function App() {
           password &&
           (connectExportMetrics || connectExportLogs || connectExportSystemLogs),
       ),
-    [host, username, password, connectExportMetrics, connectExportLogs, connectExportSystemLogs],
+    [
+      host,
+      username,
+      password,
+      connectExportMetrics,
+      connectExportLogs,
+      connectExportSystemLogs,
+      connectExportLtmLogs,
+      connectExportAsmLogs,
+      connectExportAfmLogs,
+      connectExportAvrLogs,
+    ],
   );
 
   const connect = useCallback(async () => {
@@ -337,6 +356,10 @@ export default function App() {
           export_metrics: connectExportMetrics,
           export_logs: connectExportLogs,
           export_system_logs: connectExportSystemLogs,
+          export_ltm_logs: connectExportLtmLogs,
+          export_asm_logs: connectExportAsmLogs,
+          export_afm_logs: connectExportAfmLogs,
+          export_avr_logs: connectExportAvrLogs,
         }),
       });
       const data = await readJson<{
@@ -368,6 +391,10 @@ export default function App() {
     connectExportMetrics,
     connectExportLogs,
     connectExportSystemLogs,
+    connectExportLtmLogs,
+    connectExportAsmLogs,
+    connectExportAfmLogs,
+    connectExportAvrLogs,
     refreshDevices,
   ]);
 
@@ -991,6 +1018,42 @@ export default function App() {
             />
             Export logs (remote syslog/HSL profiles)
           </label>
+          {connectExportLogs && (
+            <div className="connect-export-suboptions">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={connectExportLtmLogs}
+                  onChange={(e) => setConnectExportLtmLogs(e.target.checked)}
+                />
+                LTM request logs
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={connectExportAsmLogs}
+                  onChange={(e) => setConnectExportAsmLogs(e.target.checked)}
+                />
+                ASM security logs
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={connectExportAfmLogs}
+                  onChange={(e) => setConnectExportAfmLogs(e.target.checked)}
+                />
+                AFM security logs
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={connectExportAvrLogs}
+                  onChange={(e) => setConnectExportAvrLogs(e.target.checked)}
+                />
+                AVR analytics profiles
+              </label>
+            </div>
+          )}
           <label className="check">
             <input
               type="checkbox"

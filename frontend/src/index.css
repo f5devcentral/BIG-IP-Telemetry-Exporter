@@ -268,6 +268,14 @@ a:hover {
   color: var(--text);
 }
 
+.connect-export-suboptions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding-left: 0.25rem;
+}
+
 .api-table-wrap {
   max-height: 280px;
   overflow: auto;

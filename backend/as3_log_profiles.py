@@ -344,6 +344,10 @@ def ensure_log_profiles_via_as3(
     client: BigIPClient,
     *,
     log_host: str | None = None,
+    include_ltm: bool = True,
+    include_asm: bool = True,
+    include_afm: bool = True,
+    include_avr: bool = True,
 ) -> LogProfilesResult:
     """Install AS3 if needed, then deploy remote logging/analytics profiles."""
     ensure_as3_available(client)
@@ -357,11 +361,11 @@ def ensure_log_profiles_via_as3(
             f"Log collector host {host!r} is loopback; BIG-IP AS3 requires a reachable IP or hostname."
         )
 
-    include_ltm = flags["ltm"] and _ltm_enabled()
-    include_asm = flags["asm"] and _asm_enabled()
-    include_afm = flags["afm"] and _afm_enabled()
-    include_http = flags["avr"] and _http_analytics_enabled()
-    include_tcp = flags["avr"] and _tcp_analytics_enabled()
+    include_ltm = include_ltm and flags["ltm"] and _ltm_enabled()
+    include_asm = include_asm and flags["asm"] and _asm_enabled()
+    include_afm = include_afm and flags["afm"] and _afm_enabled()
+    include_http = include_avr and flags["avr"] and _http_analytics_enabled()
+    include_tcp = include_avr and flags["avr"] and _tcp_analytics_enabled()
 
     if not any((include_ltm, include_asm, include_afm, include_http, include_tcp)):
         return LogProfilesResult()

@@ -88,8 +88,12 @@ class _Session:
     log_hsl_target: str | None = None
     system_syslog_target: str | None = None
     export_metrics: bool = True
-    export_logs: bool = True
+    export_logs: bool = True  # derived compatibility flag
     export_system_logs: bool = False
+    export_ltm_logs: bool = True
+    export_asm_logs: bool = True
+    export_afm_logs: bool = True
+    export_avr_logs: bool = True
 
 
 _sessions: dict[str, _Session] = {}
@@ -172,6 +176,10 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
         "export_metrics": sess.export_metrics,
         "export_logs": sess.export_logs,
         "export_system_logs": sess.export_system_logs,
+        "export_ltm_logs": sess.export_ltm_logs,
+        "export_asm_logs": sess.export_asm_logs,
+        "export_afm_logs": sess.export_afm_logs,
+        "export_avr_logs": sess.export_avr_logs,
         "connected_since": sess.created,
     }
 
@@ -216,8 +224,12 @@ class ConnectBody(BaseModel):
     verify_tls: bool = False
     label: str = ""
     export_metrics: bool = True
-    export_logs: bool = True
+    export_logs: bool = True  # deprecated umbrella; use per-type flags
     export_system_logs: bool = False
+    export_ltm_logs: bool = True
+    export_asm_logs: bool = True
+    export_afm_logs: bool = True
+    export_avr_logs: bool = True
 
 
 class ConnectResponse(BaseModel):
@@ -240,6 +252,10 @@ class ConnectResponse(BaseModel):
     export_metrics: bool = True
     export_logs: bool = True
     export_system_logs: bool = False
+    export_ltm_logs: bool = True
+    export_asm_logs: bool = True
+    export_afm_logs: bool = True
+    export_avr_logs: bool = True
 
 
 class ExporterItem(BaseModel):
@@ -361,7 +377,15 @@ def list_devices() -> dict[str, Any]:
 
 @app.post("/api/connect", response_model=ConnectResponse)
 def connect(body: ConnectBody, request: Request) -> ConnectResponse:
-    if not body.export_metrics and not body.export_logs:
+    any_logs = bool(
+        body.export_system_logs
+        or body.export_ltm_logs
+        or body.export_asm_logs
+        or body.export_afm_logs
+        or body.export_avr_logs
+        or body.export_logs
+    )
+    if not body.export_metrics and not any_logs:
         raise HTTPException(
             status_code=400,
             detail="Select at least one of export metrics or export logs.",
@@ -423,10 +447,17 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
                     warning,
                     f"Connected, but could not enable system log forwarding ({exc}).",
                 )
-        if body.export_logs:
+        if body.export_logs or body.export_ltm_logs or body.export_asm_logs or body.export_afm_logs or body.export_avr_logs:
             try:
                 log_host = resolve_syslog_host(browser_host=_browser_host(request))
-                profiles = ensure_log_profiles_via_as3(client, log_host=log_host)
+                profiles = ensure_log_profiles_via_as3(
+                    client,
+                    log_host=log_host,
+                    include_ltm=body.export_logs or body.export_ltm_logs,
+                    include_asm=body.export_logs or body.export_asm_logs,
+                    include_afm=body.export_logs or body.export_afm_logs,
+                    include_avr=body.export_logs or body.export_avr_logs,
+                )
                 request_log_profile = profiles.request_log_profile
                 request_log_profile_created = profiles.request_log_profile_created
                 asm_log_profile = profiles.asm_log_profile
@@ -451,6 +482,14 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
         host_norm = _normalize_host(body.host)
         label = (body.label or "").strip() or _display_host(host_norm)
         sid = secrets.token_urlsafe(24)
+        export_logs_compat = bool(
+            body.export_logs
+            or body.export_ltm_logs
+            or body.export_asm_logs
+            or body.export_afm_logs
+            or body.export_avr_logs
+            or body.export_system_logs
+        )
         _sessions[sid] = _Session(
             client=client,
             host=host_norm,
@@ -472,8 +511,12 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             log_hsl_target=log_hsl_target,
             system_syslog_target=system_syslog_target,
             export_metrics=body.export_metrics,
-            export_logs=body.export_logs,
+            export_logs=export_logs_compat,
             export_system_logs=body.export_system_logs,
+            export_ltm_logs=body.export_ltm_logs,
+            export_asm_logs=body.export_asm_logs,
+            export_afm_logs=body.export_afm_logs,
+            export_avr_logs=body.export_avr_logs,
         )
         return ConnectResponse(
             session_id=sid,
@@ -493,8 +536,12 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             log_syslog_target=log_syslog_target,
             log_hsl_target=log_hsl_target,
             export_metrics=body.export_metrics,
-            export_logs=body.export_logs,
+            export_logs=export_logs_compat,
             export_system_logs=body.export_system_logs,
+            export_ltm_logs=body.export_ltm_logs,
+            export_asm_logs=body.export_asm_logs,
+            export_afm_logs=body.export_afm_logs,
+            export_avr_logs=body.export_avr_logs,
         )
     except HTTPException:
         raise
@@ -677,7 +724,7 @@ def _resolve_export_sessions(
         label = sess.label or _display_host(sess.host)
         if sess.export_metrics:
             metrics_clients.append((_display_host(sess.host), sid, sess.client))
-        if sess.export_logs:
+        if sess.export_logs or sess.export_system_logs:
             log_hosts.append(label)
     if not metrics_clients and not log_hosts:
         raise HTTPException(
