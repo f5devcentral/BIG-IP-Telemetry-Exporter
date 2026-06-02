@@ -404,32 +404,9 @@ def _load_apis() -> list[dict[str, str]]:
         return [_normalize_api_row(r) for r in csv.DictReader(f)]
 
 
-def _catalog_metric_endpoints(
-    *,
-    metrics_only: bool = True,
-    modules: list[str] | None = None,
-) -> list[str]:
-    rows = _load_apis()
-    if metrics_only:
-        rows = [r for r in rows if r.get("collect_metrics", "").lower() == "true"]
-    if modules:
-        mods = {m.upper() for m in modules}
-        rows = [r for r in rows if (r.get("module") or "").upper() in mods]
-    return [r["endpoint"] for r in rows]
-
-
-def _resolve_metric_endpoints_for_session(
-    sess: _Session,
-    *,
-    fallback_endpoints: list[str],
-    metrics_only: bool,
-    modules: list[str],
-) -> list[str]:
-    if sess.metric_endpoints:
-        return list(sess.metric_endpoints)
-    if fallback_endpoints:
-        return list(fallback_endpoints)
-    return _catalog_metric_endpoints(metrics_only=metrics_only, modules=modules or None)
+def _resolve_metric_endpoints_for_session(sess: _Session) -> list[str]:
+    """Return the session's explicit metric endpoint selection (empty means none)."""
+    return list(sess.metric_endpoints)
 
 
 def _live_metric_endpoints_for_session(session_id: str) -> list[str]:
@@ -437,13 +414,7 @@ def _live_metric_endpoints_for_session(session_id: str) -> list[str]:
     sess = _sessions.get(session_id)
     if not sess or not sess.export_metrics:
         return []
-    cfg = _export_config or {}
-    return _resolve_metric_endpoints_for_session(
-        sess,
-        fallback_endpoints=list(cfg.get("endpoints") or []),
-        metrics_only=bool(cfg.get("metrics_only", True)),
-        modules=list(cfg.get("modules") or []),
-    )
+    return _resolve_metric_endpoints_for_session(sess)
 
 
 def _stop_metrics_export(*, join_timeout_sec: float = 10.0) -> None:
@@ -768,9 +739,6 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
 
         host_norm = _normalize_host(body.host)
         label = (body.label or "").strip() or _display_host(host_norm)
-        default_metric_endpoints = (
-            _catalog_metric_endpoints(metrics_only=True) if body.export_metrics else []
-        )
         sid = secrets.token_urlsafe(24)
         _sessions[sid] = _Session(
             client=client,
@@ -806,7 +774,7 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             prov_asm=prov_asm,
             prov_afm=prov_afm,
             prov_avr=prov_avr,
-            metric_endpoints=default_metric_endpoints,
+            metric_endpoints=[],
         )
         _persist_runtime_state()
         return ConnectResponse(
@@ -1117,10 +1085,6 @@ def export_status() -> dict[str, Any]:
 
 def _resolve_export_sessions(
     session_ids: list[str],
-    *,
-    fallback_endpoints: list[str],
-    metrics_only: bool,
-    modules: list[str],
 ) -> tuple[list[tuple[str, str, BigIPClient]], list[str]]:
     _gc_sessions()
     ids = session_ids or list(_sessions.keys())
@@ -1135,12 +1099,7 @@ def _resolve_export_sessions(
         sess = _get_session(sid)
         label = sess.label or _display_host(sess.host)
         if sess.export_metrics:
-            endpoints = _resolve_metric_endpoints_for_session(
-                sess,
-                fallback_endpoints=fallback_endpoints,
-                metrics_only=metrics_only,
-                modules=modules,
-            )
+            endpoints = _resolve_metric_endpoints_for_session(sess)
             if not endpoints:
                 raise HTTPException(
                     status_code=400,
@@ -1167,12 +1126,7 @@ def _resolve_export_sessions(
 
 def _start_export(body: ExportStartBody) -> dict[str, Any]:
     global _export_loop, _pusher, _log_export, _export_config
-    metrics_clients, log_hosts = _resolve_export_sessions(
-        body.session_ids,
-        fallback_endpoints=body.endpoints,
-        metrics_only=body.metrics_only,
-        modules=list(body.modules),
-    )
+    metrics_clients, log_hosts = _resolve_export_sessions(body.session_ids)
     resolved_session_ids = body.session_ids if body.session_ids else list(_sessions.keys())
     endpoints_by_session = {
         sid: _live_metric_endpoints_for_session(sid)
