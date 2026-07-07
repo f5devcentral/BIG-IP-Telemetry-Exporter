@@ -3,6 +3,7 @@ FROM node:20-alpine AS frontend-build
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
+COPY F5-logo-F5-rgb.svg /build/F5-logo-F5-rgb.svg
 COPY frontend/ ./
 RUN npm run build
 
