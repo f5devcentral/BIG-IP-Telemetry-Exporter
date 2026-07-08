@@ -200,6 +200,73 @@ def _walk_nested_stats(
                     )
 
 
+_ROLLUP_SUFFIXES = (
+    "_device_avg",
+    "_device_max",
+    "_host_avg",
+    "_host_max",
+    "_tmm_avg",
+    "_tmm_max",
+)
+
+
+def _is_rollup_metric(name: str) -> bool:
+    return any(name.endswith(suffix) for suffix in _ROLLUP_SUFFIXES)
+
+
+def _rollup_object_group(object_label: str) -> str | None:
+    """Map a bigip.object label to a rollup bucket (cpu, host memory, TMM memory)."""
+    label = object_label.lower()
+    if "cpuinfo" in label:
+        return "cpu"
+    if label.startswith("memory_host") or ".memory_host" in label:
+        return "memory_host"
+    if label.startswith("memory_tmm") or ".memory_tmm" in label or "memory_tmm" in label:
+        return "memory_tmm"
+    return None
+
+
+def _rollup_metric_names(base_name: str, group: str) -> tuple[str, str]:
+    if group == "cpu":
+        return f"{base_name}_device_avg", f"{base_name}_device_max"
+    if group == "memory_host":
+        return f"{base_name}_host_avg", f"{base_name}_host_max"
+    if group == "memory_tmm":
+        return f"{base_name}_tmm_avg", f"{base_name}_tmm_max"
+    raise ValueError(f"unknown rollup group: {group}")
+
+
+def _append_device_rollups(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Emit device-level avg/max rollups for per-core CPU and host/TMM memory objects."""
+    buckets: dict[tuple[str, str, str], list[float]] = {}
+    for pt in points:
+        name = str(pt["name"])
+        if _is_rollup_metric(name):
+            continue
+        attrs = pt.get("attributes") or {}
+        obj = attrs.get("bigip.object")
+        host = str(attrs.get("bigip.host", "unknown"))
+        if not obj:
+            continue
+        group = _rollup_object_group(str(obj))
+        if group is None:
+            continue
+        key = (name, group, host)
+        buckets.setdefault(key, []).append(float(pt["value"]))
+
+    rollups: list[dict[str, Any]] = []
+    for (name, group, host), values in buckets.items():
+        if not values:
+            continue
+        avg_name, max_name = _rollup_metric_names(name, group)
+        host_attrs = {"bigip.host": host}
+        rollups.append(
+            {"name": avg_name, "value": sum(values) / len(values), "attributes": host_attrs},
+        )
+        rollups.append({"name": max_name, "value": max(values), "attributes": host_attrs})
+    return rollups
+
+
 def extract_metrics(
     endpoint: str,
     payload: Any,
@@ -215,4 +282,5 @@ def extract_metrics(
         bigip_host=bigip_host,
     ):
         points.append({"name": name, "value": value, "attributes": attrs})
+    points.extend(_append_device_rollups(points))
     return points

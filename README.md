@@ -237,8 +237,8 @@ REST equivalent: `POST /api/export/start` with body `{ "session_ids": ["..."], "
 |-------|----------|
 | Sessions | One session per device; list via `GET /api/bigips` |
 | Metric identity | OTLP instruments keyed per `bigip.host` so values do not overwrite across devices |
-| Metric naming | One OTLP metric name per stat field, e.g. `bigip_tm_ltm_virtual_stats_clientside_bitsin` |
-| Attributes (dimensions) | `bigip_host` (device), `bigip_object` (virtual server, pool slot, etc.) |
+| Metric naming | One OTLP metric name per stat field, e.g. `bigip_tm_ltm_virtual_stats_clientside_bitsin`; device rollups for CPU (`*_device_avg` / `*_device_max`) and memory (`*_host_avg|max`, `*_tmm_avg|max`) |
+| Attributes (dimensions) | `bigip_host` (device), `bigip_object` (virtual server, pool slot, CPU core, memory object, etc.); rollups use `bigip_host` only |
 | Excluded objects | Metrics whose `bigip_object` contains `fiveminavg`, `fivesecavg`, or `oneminavge` / `oneminavg` are dropped (override: `BIGIP_EXCLUDE_OBJECT_PATTERNS`) |
 | Export scope | Only devices checked in the connections list (unless using API with explicit `session_ids`) |
 | Network | Each device must be reachable from the host/pod running the Python backend |
