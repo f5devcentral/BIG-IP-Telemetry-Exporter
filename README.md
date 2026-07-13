@@ -7,6 +7,7 @@ The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Co
 ## Table of contents
 
 - [Architecture](#architecture)
+- [Authentication Security](#authentication-security)
 - [User guide](#user-guide)
   - [UI overview](#ui-overview)
   - [Session persistence across restarts](#session-persistence-across-restarts)
@@ -66,6 +67,51 @@ flowchart LR
 | **Python backend** | Sessions to one or more BIG-IPs; polls selected `/mgmt/.../stats` endpoints; configures remote logging via AS3 and system syslog; pushes OTLP metrics to the collector |
 | **OTEL Collector** | Receives OTLP metrics on `:4318`; receives BIG-IP logs on syslog `:5140` (ASM/AFM) and tcplog `:5141` (LTM request logging); forwards via UI-configured exporters |
 | **React frontend** | Multi-BIG-IP connect form, per-device log export toggles (provisioned modules only), API catalog, split metric/log collector exporters, export controls |
+
+## Authentication Security
+
+The exporter authenticates to each BIG-IP with **iControl REST** using the credentials you enter in the UI. It does **not** store tokens in the browser and does not implement its own identity provider for the web UI.
+
+### How login works
+
+1. On **Connect**, the browser sends host, username, password, and TLS options to the local backend (`POST /api/connect`) over the same origin as the UI (typically `http://<host>:8001`).
+2. The backend opens HTTPS to the BIG-IP and `POST`s to `/mgmt/shared/authn/login` (TMOS login provider).
+3. BIG-IP returns an auth token. The backend stores that token only in the in-memory `BigIPClient` session and sends it on later calls as the `X-F5-Auth-Token` header.
+4. After login, the backend attempts to **extend** the token lifetime (default login timeout is ~20 minutes; extension targets ~60 minutes when allowed by the platform).
+5. Metric polls and AS3 / syslog configuration use that token. On **401**, the client clears any stale token header, logs in again with the stored password, and retries the request.
+
+On **Remove**, the backend deletes the token on the BIG-IP (`DELETE /mgmt/shared/authz/tokens/...`) and drops the local session.
+
+### Encryption used
+
+| Layer | Algorithm / mechanism | What it protects |
+|-------|----------------------|------------------|
+| **BIG-IP transport** | **TLS** (HTTPS). Cipher suite and TLS version are negotiated by the BIG-IP and the Python `requests` / OpenSSL stack on the host. | Username/password on login and all subsequent iControl REST traffic (including the auth token). |
+| **Password at rest** | **Fernet** from the Python [`cryptography`](https://cryptography.io/) package (`cryptography.fernet.Fernet`). Fernet is **symmetric authenticated encryption**: **AES-128 in CBC mode** with a **HMAC-SHA256** integrity check (URL-safe base64 token format). Implemented in `backend/session_store.py`. | Only the password field in `sessions.json`. Host, username, and other session metadata are stored in plaintext JSON. |
+| **Encryption key** | A Fernet key (32 url-safe base64-encoded bytes). Auto-generated with `Fernet.generate_key()` into `sessions.key`, or supplied via `BIGIP_SESSION_ENCRYPTION_KEY`. | Required to decrypt stored passwords. Losing the key makes encrypted passwords unrecoverable. |
+
+Fernet does **not** encrypt the entire session file — only each password string. Tokens are **not** written to disk; they exist only in process memory until logout or restart (restart re-logins with the decrypted password).
+
+### What is secured (and what is not)
+
+| Area | Behavior |
+|------|----------|
+| **Transport to BIG-IP** | Always HTTPS (`https://<host>`). Optional **Verify TLS certificate** in the UI (`verify_tls`); default is off so lab devices with self-signed certs still work. Enable verification in production when the BIG-IP presents a trusted certificate. |
+| **Token vs password on the wire** | After the initial login, day-to-day API calls use the token, not the password. Token expiry triggers a fresh login. |
+| **Browser** | Passwords are not persisted in localStorage. The UI only holds credentials long enough to POST connect. Device list comes from `GET /api/bigips`. |
+| **At-rest session store** | When `BIGIP_SESSION_PERSIST=true` (default), passwords are Fernet-encrypted (AES-128-CBC + HMAC-SHA256) into `~/.config/bigip-telemetry-exporter/sessions.json`. The key is `sessions.key` (mode `0600` when creatable) or `BIGIP_SESSION_ENCRYPTION_KEY`. The JSON file is also chmod `0600` when possible. |
+| **Backend process memory** | Decrypted passwords and live tokens remain in the Python process for reconnect and export. Anyone who can read that process memory or ptrace the user running the API can recover them. |
+| **Web UI / API surface** | The FastAPI server has **no login**. Anyone who can reach `:8001` can connect BIG-IPs (if they know device credentials) and change export/collector config. Bind and firewall accordingly. |
+
+### Recommendations
+
+- Prefer a **least-privilege** BIG-IP account with iControl REST rights only for the stats and configuration this tool needs — not your personal admin password when avoidable.
+- Enable **Verify TLS certificate** when BIG-IP certificates are valid for the management hostname/IP you configure.
+- Treat `sessions.json` / `sessions.key` like secrets; use `BIGIP_SESSION_PERSIST=false` on shared jump hosts if you must not keep passwords on disk.
+- In containers/Kubernetes, set a stable `BIGIP_SESSION_ENCRYPTION_KEY` (or mounted key file) so restarts can decrypt the store, and restrict who can open the UI port.
+- Do not expose port **8001** on untrusted networks without an external auth proxy or VPN.
+
+Related: [Session persistence across restarts](#session-persistence-across-restarts).
 
 ## User guide
 
