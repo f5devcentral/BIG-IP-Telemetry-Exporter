@@ -14,7 +14,6 @@ resources:
   - configmap-otel-collector.yaml
   - configmap-prometheus.yaml
   - rbac-prometheus.yaml
-  - rbac-backend.yaml
   - deployment-otel-collector.yaml
   - deployment-prometheus.yaml
   - deployment-backend.yaml

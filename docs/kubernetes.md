@@ -143,25 +143,9 @@ The backend uses `OTLP_HTTP_ENDPOINT=http://otel-collector.bigip-telemetry.svc.c
 | `OTLP_HTTP_ENDPOINT` | `http://otel-collector.bigip-telemetry.svc.cluster.local:4318` | Backend → collector (in-cluster) |
 | `ACCESS_HOST` | *(unset)* | Force browser link hostname; default = HTTP `Host` header |
 | `COLLECTOR_CONFIG_PATH` | `/tmp/collector-config.yaml` | Where API writes generated YAML |
-| `COLLECTOR_RESTART_MODE` | `kubernetes` | Use Kubernetes/OpenShift API (or kubectl) after Apply |
-| `COLLECTOR_K8S_NAMESPACE` | pod namespace | Namespace for ConfigMap/Deployment updates |
-| `COLLECTOR_K8S_DEPLOYMENT` | `otel-collector` | Collector Deployment name |
-| `COLLECTOR_K8S_CONFIGMAP` | `otel-collector-config` | ConfigMap key source for `/etc/otelcol/config.yaml` |
 | `COLLECTOR_RESTART_HINT` | `kubectl ... rollout restart ...` | Shown after Apply in UI when auto-restart unavailable |
 | `BIGIP_LOG_SYSLOG_HOST` | *(auto)* | IP/hostname BIG-IP uses for remote log pools; must be reachable from BIG-IP |
-| `COLLECTOR_AUTO_RESTART` | `true` | Set `false` to write config without updating/restarting collector |
-
-### Applying collector exporters on Kubernetes / OpenShift
-
-**Apply collector config** in the UI writes YAML, then the backend:
-
-1. Patches ConfigMap `otel-collector-config` (`config.yaml`) via the Kubernetes API  
-2. Rollout-restarts Deployment `otel-collector`  
-3. Waits for the collector health endpoint  
-
-This uses ServiceAccount `bigip-telemetry-backend` and Role `bigip-telemetry-collector-config` (see `k8s/base/rbac-backend.yaml`). Docker Compose continues to use `docker compose restart` instead.
-
-Rebuild and redeploy the backend image after upgrading so the `kubernetes` Python client and RBAC are present. Set `COLLECTOR_AUTO_RESTART=false` to disable automatic ConfigMap sync.
+| `COLLECTOR_AUTO_RESTART` | `true` | Set `false` to write config without restarting collector |
 
 ## BIG-IP network connectivity
 
@@ -231,7 +215,7 @@ docker rmi bigip-telemetry-exporter:latest
 |---------|--------|
 | `ErrImagePull` / `authorization failed` for `bigip-telemetry-exporter` | Image is not on Docker Hub. Use `./scripts/k8s-deploy.sh local` after build+load, or `IMAGE=<registry>/... ./scripts/k8s-deploy.sh minimal` after push |
 | Backend `ImagePullBackOff` | Same as above; `kubectl describe pod` → Events |
-| No metrics at downstream sink | `kubectl logs deploy/otel-collector`; export started in UI? Devices checked for metrics? Metric exporters configured? After **Apply collector config**, check UI restart status and that ConfigMap `otel-collector-config` contains Splunk/etc. |
+| No metrics at downstream sink | `kubectl logs deploy/otel-collector`; export started in UI? Devices checked for metrics? Metric exporters configured? |
 | No logs in collector | BIG-IP → collector on 5140/5141? `BIGIP_LOG_SYSLOG_HOST` set correctly? Log exporters configured? |
 | OTLP errors in backend logs | Service `otel-collector` endpoints; port 4318 |
 | BIG-IP login fails | Network/firewall; TLS verify setting |

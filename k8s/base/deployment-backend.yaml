@@ -16,7 +16,6 @@ spec:
         app.kubernetes.io/name: bigip-telemetry-backend
         app.kubernetes.io/component: api
     spec:
-      serviceAccountName: bigip-telemetry-backend
       containers:
         - name: backend
           # Not published to Docker Hub — build locally (overlay: local) or set IMAGE when deploying.
@@ -29,24 +28,16 @@ spec:
             - name: PORT
               value: "8000"
             - name: OTLP_HTTP_ENDPOINT
-              value: http://otel-collector:4318
+              value: http://otel-collector.bigip-telemetry.svc.cluster.local:4318
             # Browser links use the request Host (your machine IP when port-forward uses --address 0.0.0.0).
             - name: COLLECTOR_CONFIG_PATH
               value: /tmp/collector-config.yaml
+            - name: COLLECTOR_RESTART_HINT
+              value: kubectl -n bigip-telemetry rollout restart deployment/otel-collector
             - name: COLLECTOR_RESTART_MODE
               value: kubernetes
-            - name: COLLECTOR_K8S_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: COLLECTOR_K8S_DEPLOYMENT
-              value: otel-collector
-            - name: COLLECTOR_K8S_CONFIGMAP
-              value: otel-collector-config
             - name: COLLECTOR_HEALTH_URL
-              value: http://otel-collector:13133
-            - name: COLLECTOR_RESTART_HINT
-              value: kubectl rollout restart deployment/otel-collector
+              value: http://otel-collector.bigip-telemetry.svc.cluster.local:13133
           readinessProbe:
             httpGet:
               path: /api/health
