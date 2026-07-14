@@ -41,6 +41,7 @@ The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Co
   - [Step 2 — Deploy the stack](#step-2--deploy-the-stack)
   - [Step 3 — Open the UI](#step-3--open-the-ui)
   - [Step 4 — Use the application](#step-4--use-the-application-on-kubernetes)
+  - [Apply collector config on Kubernetes / OpenShift](#apply-collector-config-on-kubernetes--openshift)
   - [Step 5 — Uninstall](#step-5--uninstall)
   - [Manifests and overlays](#manifests-and-overlays)
   - [Kubernetes troubleshooting](#kubernetes-troubleshooting)
@@ -281,7 +282,7 @@ The UI has two sections:
 - **Log exporters** — sinks for logs received on syslog `:5140` and tcplog `:5141`.
 
 1. Add or enable exporters in each section (for metrics, add a Prometheus scrape exporter, OTLP remote write, or other sink as needed).
-2. Click **Apply collector config** — writes `otel-collector/generated-config.yaml` and **restarts** the OpenTelemetry Collector (Docker Compose or `kubectl` when available).
+2. Click **Apply collector config** — writes the generated collector YAML and **restarts** the OpenTelemetry Collector (Docker Compose locally; on Kubernetes/OpenShift, patches ConfigMap `otel-collector-config` and rollout-restarts the collector Deployment).
 3. If restart fails, the UI shows a manual command. Set `COLLECTOR_AUTO_RESTART=false` to only write YAML without restarting.
 
 ### 4. Start export
@@ -791,9 +792,22 @@ Follow the **[User guide](#user-guide)**. Kubernetes-specific checklist:
 
 1. Open **`http://<HOST-IP>:8001`** (port-forward `8001:8000`).
 2. Connect with **Export metrics** and/or log options; use per-device LTM/ASM/AFM/AVR and system syslog toggles.
-3. Select APIs; configure **metric** and **log** collector exporters → **Apply collector config** (auto-restarts collector, or run `./scripts/k8s-apply-collector-config.sh`).
-4. **Start export** — OTLP endpoint should remain the in-cluster URL (`http://otel-collector.bigip-telemetry.svc.cluster.local:4318`).
+3. Select APIs; configure **metric** and **log** collector exporters → **Apply collector config**.
+4. **Start export** — OTLP endpoint should remain the in-cluster collector Service (default `http://otel-collector:4318`).
 5. For log export, ensure BIG-IP can reach collector **5140** / **5141**; set `BIGIP_LOG_SYSLOG_HOST` on the backend if needed.
+
+#### Apply collector config on Kubernetes / OpenShift
+
+Connecting or configuring a BIG-IP does **not** change collector exporter sinks. Changing Splunk/Datadog/etc. in the UI requires **Apply collector config**, which (when `COLLECTOR_AUTO_RESTART=true`):
+
+1. Writes YAML inside the backend pod (`COLLECTOR_CONFIG_PATH`, default `/tmp/collector-config.yaml`)
+2. Patches ConfigMap **`otel-collector-config`** (`config.yaml`) via the in-cluster Kubernetes API
+3. Rollout-restarts Deployment **`otel-collector`** and waits for health (`COLLECTOR_HEALTH_URL`)
+
+Requires ServiceAccount **`bigip-telemetry-backend`** and Role **`bigip-telemetry-collector-config`** (`k8s/base/rbac-backend.yaml`). Rebuild/redeploy the backend image so the `kubernetes` client library is present.
+
+- **Disable:** set `COLLECTOR_AUTO_RESTART=false` on the backend Deployment.
+- **Manual fallback:** `./scripts/k8s-apply-collector-config.sh` (or the kubectl create configmap + rollout restart flow in [`docs/kubernetes.md`](docs/kubernetes.md)).
 
 ### Step 5 — Uninstall
 
@@ -830,7 +844,8 @@ After uninstall:
 
 | Path | Description |
 |------|-------------|
-| [`k8s/base/`](k8s/base/) | Namespace, ConfigMaps, Deployments, Services, sample Ingress |
+| [`k8s/base/`](k8s/base/) | Namespace, ConfigMaps, Deployments, Services, sample Ingress, backend RBAC for collector config apply |
+| [`k8s/base/rbac-backend.yaml`](k8s/base/rbac-backend.yaml) | ServiceAccount/Role so **Apply collector config** can patch ConfigMap + restart collector |
 | [`k8s/overlays/local/`](k8s/overlays/local/) | Local image (`imagePullPolicy: Never`) |
 | [`k8s/overlays/minimal/`](k8s/overlays/minimal/) | No Ingress; requires `IMAGE=<registry>/...` |
 | [`k8s/overlays/example/`](k8s/overlays/example/) | Example registry + Ingress hostnames |
@@ -843,8 +858,9 @@ Do not deploy `minimal` without pushing an image — `bigip-telemetry-exporter:l
 |---------|----------------|
 | `ErrImagePull` / `authorization failed` | Image not on Docker Hub — use [`local` overlay](#step-2--deploy-the-stack) or push to your registry |
 | `401` / connect errors in UI | Pod network → BIG-IP management IP; TLS verify setting |
-| No metrics at downstream sink | Export started? Devices checked for metrics? Metric exporters configured? `kubectl logs -n bigip-telemetry deploy/otel-collector` |
-| No logs in collector | BIG-IP → collector on 5140/5141? `BIGIP_LOG_SYSLOG_HOST`? Log exporters configured? |
+| No metrics at downstream sink (still Prometheus only) | Add exporters under **Metric exporters**, click **Apply collector config**, confirm UI restart succeeded; `kubectl -n bigip-telemetry get cm otel-collector-config -o yaml` should list Splunk/etc.; `kubectl logs -n bigip-telemetry deploy/otel-collector` |
+| Apply collector config fails / old ConfigMap | Backend image rebuilt with `kubernetes` package? RBAC applied (`rbac-backend.yaml`)? `kubectl auth can-i patch configmap/otel-collector-config --as=system:serviceaccount:<ns>:bigip-telemetry-backend -n <ns>` |
+| No logs in collector | BIG-IP → collector on 5140/5141? `BIGIP_LOG_SYSLOG_HOST`? Log exporters configured + applied? |
 | Backend pod not ready | Probes hit port 8000 — image must set `PORT=8000` (included in `Dockerfile`) |
 | Port-forward only on localhost | Add `--address 0.0.0.0` (see Step 3) |
 
@@ -880,12 +896,20 @@ The UI configures exporters from the [OpenTelemetry Collector Contrib](https://g
 | **Messaging** | Kafka, Pulsar, RabbitMQ, syslog |
 | **Advanced** | **Contrib exporter (custom YAML)** — any other contrib component; paste settings from upstream docs |
 
-After **Apply collector config**, the API restarts the collector when docker or kubectl is available. Set `COLLECTOR_AUTO_RESTART=false` to disable.
+After **Apply collector config**:
+
+| Environment | Behavior |
+|-------------|----------|
+| **Ubuntu / macOS (docker compose)** | Writes `otel-collector/generated-config.yaml` and restarts the `otel-collector` container |
+| **Kubernetes / OpenShift** | Writes pod-local YAML, patches ConfigMap `otel-collector-config`, rollout-restarts Deployment `otel-collector` via the in-cluster API (backend ServiceAccount RBAC) |
+
+Set `COLLECTOR_AUTO_RESTART=false` to write YAML only (no restart / no ConfigMap sync).
 
 - **Ubuntu / macOS (manual fallback):** `docker compose restart otel-collector`
-- **Kubernetes:** `./scripts/k8s-apply-collector-config.sh`
+- **Kubernetes (manual fallback):** `./scripts/k8s-apply-collector-config.sh`
 
-Generated config file: `otel-collector/generated-config.yaml`
+Local generated config file (non-K8s default): `otel-collector/generated-config.yaml`  
+Details: [`docs/kubernetes.md`](docs/kubernetes.md) (section *Applying collector exporters on Kubernetes / OpenShift*).
 
 Catalog API: `GET /api/exporters/catalog` (categories, field schemas, links to [contrib exporter docs](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter)).
 
@@ -896,11 +920,14 @@ Catalog API: `GET /api/exporters/catalog` (categories, field schemas, links to [
 | `BIGIP_EXCLUDE_OBJECT_PATTERNS` | `fiveminavg,fivesecavg,oneminavge,oneminavg` | Comma-separated substrings; if `bigip_object` contains any, the metric is skipped |
 | `PORT` | `8001` (local), `8000` (Docker/K8s image) | API listen port |
 | `OTLP_HTTP_ENDPOINT` | `http://127.0.0.1:4318` | Default OTLP URL in UI (K8s manifest overrides) |
-| `COLLECTOR_AUTO_RESTART` | `true` | Set `false` to write config without restarting the collector |
+| `COLLECTOR_AUTO_RESTART` | `true` | Set `false` to write config without restarting / ConfigMap sync |
 | `COLLECTOR_RESTART_CMD` | _(unset)_ | Custom restart command (overrides auto-detect) |
-| `COLLECTOR_RESTART_MODE` | auto | `docker`, `kubernetes`, or `none` |
-| `COLLECTOR_HEALTH_URL` | `http://127.0.0.1:13133` | Health check after restart |
-| `COLLECTOR_CONFIG_PATH` | `otel-collector/generated-config.yaml` | Path written by **Apply collector config** |
+| `COLLECTOR_RESTART_MODE` | auto | `docker`, `kubernetes`, or `none` (K8s manifests set `kubernetes`) |
+| `COLLECTOR_HEALTH_URL` | `http://127.0.0.1:13133` | Health check after restart (K8s: `http://otel-collector:13133`) |
+| `COLLECTOR_CONFIG_PATH` | `otel-collector/generated-config.yaml` | Path written by **Apply collector config** (K8s: `/tmp/collector-config.yaml`) |
+| `COLLECTOR_K8S_NAMESPACE` | `bigip-telemetry` / pod namespace | Namespace for ConfigMap + Deployment updates |
+| `COLLECTOR_K8S_DEPLOYMENT` | `otel-collector` | Collector Deployment name |
+| `COLLECTOR_K8S_CONFIGMAP` | `otel-collector-config` | ConfigMap updated on Apply (key `config.yaml`) |
 
 ## Repository
 

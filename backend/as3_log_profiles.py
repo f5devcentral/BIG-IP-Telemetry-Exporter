@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -132,10 +133,37 @@ def _tcp_analytics_enabled() -> bool:
     return _auto_create("BIGIP_TCP_ANALYTICS_AUTO_CREATE")
 
 
+def _is_ip_address(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host.strip())
+        return True
+    except ValueError:
+        return False
+
+
 def _pool_member(host: str, port: int) -> dict[str, Any]:
+    """
+    Build an AS3 Pool member pointing at the collector.
+
+    AS3 ``serverAddresses`` must be ``f5ip`` (literal IP). Hostnames fail schema
+    validation and often surface as a misleading ``required property 'bigip'``
+    error. Use FQDN discovery for hostnames. ``shareNodes`` is required when
+    declaring under ``/Common/Shared``.
+    """
+    normalized = host.strip()
+    if _is_ip_address(normalized):
+        return {
+            "addressDiscovery": "static",
+            "serverAddresses": [normalized],
+            "servicePort": port,
+            "shareNodes": True,
+        }
     return {
-        "serverAddresses": [host],
+        "addressDiscovery": "fqdn",
+        "hostname": normalized,
+        "autoPopulate": True,
         "servicePort": port,
+        "shareNodes": True,
     }
 
 
