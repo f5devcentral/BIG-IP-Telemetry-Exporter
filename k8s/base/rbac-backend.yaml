@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bigip-telemetry-backend
+  labels:
+    app.kubernetes.io/name: bigip-telemetry-backend
+    app.kubernetes.io/component: api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bigip-telemetry-collector-config
+  labels:
+    app.kubernetes.io/name: bigip-telemetry-backend
+    app.kubernetes.io/component: api
+rules:
+  # Apply collector config: push generated YAML into the otel-collector ConfigMap.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["otel-collector-config"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  # Rollout restart after ConfigMap update (annotation patch + status wait).
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["otel-collector"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bigip-telemetry-collector-config
+  labels:
+    app.kubernetes.io/name: bigip-telemetry-backend
+    app.kubernetes.io/component: api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bigip-telemetry-collector-config
+subjects:
+  - kind: ServiceAccount
+    name: bigip-telemetry-backend
