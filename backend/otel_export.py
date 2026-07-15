@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
 from collections.abc import Callable
 from typing import Any
 
-from opentelemetry import metrics
+import requests
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
+
+logger = logging.getLogger(__name__)
 
 # (display host, session_id, client)
 BigIPClientEntry = tuple[str, str, Any]
@@ -31,16 +34,23 @@ class OTLPMetricsPusher:
                 "service.namespace": "f5",
             }
         )
-        exporter = OTLPMetricExporter(endpoint=endpoint)
+        # Avoid corporate HTTP(S)_PROXY hijacking localhost OTLP to the collector.
+        session = requests.Session()
+        session.trust_env = False
+        exporter = OTLPMetricExporter(endpoint=endpoint, session=session)
         reader = PeriodicExportingMetricReader(
             exporter,
             export_interval_millis=interval_ms,
         )
         provider = MeterProvider(resource=resource, metric_readers=[reader])
-        metrics.set_meter_provider(provider)
-        self._meter = metrics.get_meter("bigip.metrics")
-        self._instruments: dict[str, Any] = {}
+        # Use the provider directly. Do NOT call metrics.set_meter_provider():
+        # OpenTelemetry forbids replacing the global provider, so stop/start or
+        # nuke leaves record_batch writing to a shutdown MeterProvider while
+        # force_flush on a new (empty) provider "succeeds" with no datapoints.
         self._provider = provider
+        self._meter = provider.get_meter("bigip.metrics")
+        self._instruments: dict[str, Any] = {}
+        self._last_flush_ok: bool | None = None
 
     @staticmethod
     def _otel_attributes(raw: dict[str, Any]) -> dict[str, str]:
@@ -72,10 +82,25 @@ class OTLPMetricsPusher:
         return count
 
     def force_flush(self, timeout_ms: int = 10000) -> bool:
-        return self._provider.force_flush(timeout_millis=timeout_ms)
+        ok = bool(self._provider.force_flush(timeout_millis=timeout_ms))
+        self._last_flush_ok = ok
+        if not ok:
+            logger.warning(
+                "OTLP force_flush failed for endpoint %s (metrics may not reach collector)",
+                self._endpoint,
+            )
+        return ok
 
     def shutdown(self) -> None:
         self._provider.shutdown()
+
+    @property
+    def status(self) -> dict[str, Any]:
+        return {
+            "endpoint": self._endpoint,
+            "instrument_count": len(self._instruments),
+            "last_flush_ok": self._last_flush_ok,
+        }
 
 
 class MetricsExportLoop:
@@ -121,6 +146,7 @@ class MetricsExportLoop:
             "last_errors_by_host": self._last_errors_by_host,
             "last_endpoints_by_host": self._last_endpoints_by_host,
             "poll_interval_sec": self._poll_interval_sec,
+            "otlp": self._pusher.status,
         }
 
     def run_once(self) -> dict[str, Any]:
@@ -147,7 +173,9 @@ class MetricsExportLoop:
             if host_errors:
                 errors_by_host[host] = host_errors[:10]
 
-        self._pusher.force_flush()
+        flush_ok = self._pusher.force_flush()
+        if not flush_ok:
+            errors.append("OTLP force_flush failed — collector may not have received metrics")
         self._last_run = time.time()
         self._last_point_count = total
         self._last_errors_by_host = errors_by_host
@@ -158,6 +186,7 @@ class MetricsExportLoop:
             "errors": errors,
             "errors_by_host": errors_by_host,
             "endpoints_by_host": endpoints_by_host,
+            "flush_ok": flush_ok,
         }
 
     def start_background(self) -> None:
