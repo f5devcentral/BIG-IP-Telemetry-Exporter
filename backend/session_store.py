@@ -155,6 +155,28 @@ def load_store() -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     return sessions, export_state
 
 
+def clear_store(*, remove_key: bool = False) -> dict[str, bool]:
+    """Delete persisted session + export state (and optionally the encryption key)."""
+    removed_store = False
+    removed_key = False
+    path = store_path()
+    if path.is_file():
+        try:
+            path.unlink()
+            removed_store = True
+        except OSError as exc:
+            logger.warning("Could not delete session store %s: %s", path, exc)
+    if remove_key:
+        key_file = _key_path()
+        if key_file.is_file():
+            try:
+                key_file.unlink()
+                removed_key = True
+            except OSError as exc:
+                logger.warning("Could not delete session key %s: %s", key_file, exc)
+    return {"removed_store": removed_store, "removed_key": removed_key}
+
+
 def stored_credentials(record: dict[str, Any]) -> tuple[str, str, str, bool]:
     password = decrypt_secret(str(record["password"]))
     return (

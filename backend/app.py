@@ -36,7 +36,13 @@ from backend.collector_config import (
     read_collector_config_file,
     write_collector_config,
 )
-from backend.collector_ops import auto_restart_enabled, control_status as collector_control_status, restart_collector, restart_hint
+from backend.collector_ops import (
+    auto_restart_enabled,
+    control_status as collector_control_status,
+    restart_collector,
+    restart_hint,
+    restart_prometheus,
+)
 from backend.log_forwarding import resolve_syslog_host, runtime_log_config
 from backend.log_rollback import (
     clear_session_log_resources,
@@ -46,6 +52,7 @@ from backend.log_rollback import (
 from backend.metrics_extractor import extract_metrics
 from backend.otel_export import MetricsExportLoop, OTLPMetricsPusher
 from backend.session_store import (
+    clear_store,
     load_store,
     persist_enabled,
     save_store,
@@ -629,6 +636,37 @@ class RollbackBody(BaseModel):
     save_sys_config_after: bool = Field(
         default=True,
         description="POST save sys config after rollback changes",
+    )
+
+
+class NukeBody(BaseModel):
+    confirm: bool = Field(
+        default=False,
+        description="Must be true to execute a full application reset (safety latch)",
+    )
+    rollback_bigip: bool = Field(
+        default=True,
+        description="Roll back AS3 log profiles and system syslog on each connected BIG-IP",
+    )
+    reset_collector: bool = Field(
+        default=True,
+        description="Reset collector exporters to defaults and rewrite generated config",
+    )
+    restart_collector: bool = Field(
+        default=True,
+        description="Restart collector after resetting config (when reset_collector is true)",
+    )
+    restart_prometheus: bool = Field(
+        default=True,
+        description=(
+            "Wipe and recreate local Prometheus so TSDB is empty (fresh install). "
+            "Docker Compose force-recreates the container; Kubernetes deletes pods "
+            "to discard emptyDir data."
+        ),
+    )
+    remove_encryption_key: bool = Field(
+        default=False,
+        description="Also delete the local Fernet key file used for session persistence",
     )
 
 
@@ -1301,6 +1339,149 @@ def export_stop() -> dict[str, Any]:
         _export_config = {"active": False}
     _persist_runtime_state()
     return {"stopped": True}
+
+
+@app.post("/api/nuke")
+def nuke_application(body: NukeBody) -> dict[str, Any]:
+    """
+    Full application reset: stop export, roll back BIG-IP log resources, clear
+    sessions (memory + disk), and restore default collector exporter config.
+    """
+    global _sessions, _export_loop, _pusher, _log_export, _export_config
+    global _collector_metric_exporters, _collector_log_exporters
+    global _collector_export_metrics, _collector_export_logs
+
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Nuke refused: set confirm=true in the JSON body (safety latch).",
+        )
+
+    _stop_metrics_export()
+    _log_export = {
+        "active": False,
+        "hosts": [],
+        "syslog_target": None,
+        "hsl_target": None,
+    }
+    _export_config = None
+
+    device_results: list[dict[str, Any]] = []
+    for sid, sess in list(_sessions.items()):
+        label = sess.label or _display_host(sess.host)
+        entry: dict[str, Any] = {
+            "session_id": sid,
+            "host": sess.host,
+            "label": label,
+            "rollback": None,
+            "logout": False,
+            "errors": [],
+        }
+        if body.rollback_bigip:
+            try:
+                entry["rollback"] = rollback_log_resources(
+                    sess.client,
+                    delete_as3=True,
+                    remove_system_syslog=True,
+                    save_sys_config_after=True,
+                )
+                clear_session_log_resources(sess)
+            except BigIPError as exc:
+                entry["errors"].append(f"rollback: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                entry["errors"].append(f"rollback: {exc}")
+        try:
+            sess.client.logout()
+            entry["logout"] = True
+        except Exception as exc:  # noqa: BLE001
+            entry["errors"].append(f"logout: {exc}")
+        _sessions.pop(sid, None)
+        device_results.append(entry)
+
+    store_clear = clear_store(remove_key=body.remove_encryption_key)
+    # Ensure empty state is written if persistence stays enabled.
+    _persist_runtime_state()
+
+    collector_info: dict[str, Any] | None = None
+    if body.reset_collector:
+        _collector_metric_exporters = []
+        _collector_log_exporters = []
+        _collector_export_metrics = True
+        _collector_export_logs = True
+        try:
+            path = write_collector_config(
+                _collector_metric_exporters,
+                _collector_log_exporters,
+                export_metrics=_collector_export_metrics,
+                export_logs=_collector_export_logs,
+            )
+            cfg = build_collector_config(
+                _collector_metric_exporters,
+                _collector_log_exporters,
+                export_metrics=_collector_export_metrics,
+                export_logs=_collector_export_logs,
+            )
+            restart_info: dict[str, Any] = {"attempted": False}
+            if body.restart_collector and auto_restart_enabled():
+                restart_info["attempted"] = True
+                try:
+                    restart_info.update(restart_collector(config_path=path))
+                except BigIPError as exc:
+                    restart_info.update(
+                        {
+                            "ok": False,
+                            "error": str(exc),
+                            "manual_hint": restart_hint(
+                                collector_control_status()["restart_mode"]
+                            ),
+                        },
+                    )
+            collector_info = {
+                "ok": True,
+                "path": str(path),
+                "metric_exporters": _collector_metric_exporters,
+                "log_exporters": _collector_log_exporters,
+                "collector_restart": restart_info,
+            }
+            collector_info["yaml_preview"] = _yaml_dump(cfg)[:2000]
+        except ValueError as exc:
+            collector_info = {"ok": False, "error": str(exc)}
+
+    prometheus_info: dict[str, Any] | None = None
+    if body.restart_prometheus and auto_restart_enabled():
+        prometheus_info = {"attempted": True}
+        try:
+            prometheus_info.update(restart_prometheus())
+        except BigIPError as exc:
+            mode = collector_control_status()["restart_mode"]
+            if mode == "docker":
+                hint = (
+                    f"docker compose -f {REPO_ROOT / 'docker-compose.yml'} up -d "
+                    "--force-recreate prometheus"
+                )
+            elif mode == "kubernetes":
+                hint = (
+                    f"kubectl -n {os.environ.get('COLLECTOR_K8S_NAMESPACE', 'bigip-telemetry')} "
+                    "delete pod -l app.kubernetes.io/name=prometheus --wait=true"
+                )
+            else:
+                hint = "Recreate Prometheus manually for a fresh empty TSDB."
+            prometheus_info.update({"ok": False, "error": str(exc), "manual_hint": hint})
+
+    logger.warning(
+        "Application nuke completed: %d device(s) processed, store_cleared=%s",
+        len(device_results),
+        store_clear,
+    )
+    return {
+        "ok": True,
+        "devices": device_results,
+        "export_stopped": True,
+        "sessions_remaining": len(_sessions),
+        "store": store_clear,
+        "collector": collector_info,
+        "prometheus": prometheus_info,
+    }
 
 
 def _yaml_dump(cfg: dict[str, Any]) -> str:

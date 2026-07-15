@@ -17,7 +17,9 @@ from backend.bigip_client import BigIPError
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 COLLECTOR_SERVICE = os.environ.get("COLLECTOR_COMPOSE_SERVICE", "otel-collector")
+PROMETHEUS_COMPOSE_SERVICE = os.environ.get("PROMETHEUS_COMPOSE_SERVICE", "prometheus")
 COLLECTOR_K8S_DEPLOYMENT = os.environ.get("COLLECTOR_K8S_DEPLOYMENT", "deployment/otel-collector")
+PROMETHEUS_K8S_DEPLOYMENT = os.environ.get("PROMETHEUS_K8S_DEPLOYMENT", "deployment/prometheus")
 COLLECTOR_K8S_NAMESPACE = os.environ.get("COLLECTOR_K8S_NAMESPACE", "bigip-telemetry")
 COLLECTOR_K8S_CONFIGMAP = os.environ.get("COLLECTOR_K8S_CONFIGMAP", "otel-collector-config")
 
@@ -240,6 +242,115 @@ def restart_collector(*, config_path: Path | None = None) -> dict[str, Any]:
     if mode == "docker":
         return _restart_docker()
     return _restart_kubernetes(config_path=config_path)
+
+
+def _reset_prometheus_docker() -> dict[str, Any]:
+    """Recreate the Prometheus container so TSDB data is wiped (fresh install)."""
+    if not COMPOSE_FILE.is_file():
+        raise BigIPError(f"docker-compose.yml not found at {COMPOSE_FILE}")
+    if not shutil.which("docker"):
+        raise BigIPError("docker not found in PATH")
+
+    base = ["docker", "compose", "-f", str(COMPOSE_FILE)]
+    stop = _run_command(
+        [*base, "stop", PROMETHEUS_COMPOSE_SERVICE],
+        cwd=str(REPO_ROOT),
+        label="docker compose stop prometheus",
+    )
+    # -v removes anonymous volumes if any; force-recreate clears container-local TSDB.
+    rm = _run_command(
+        [*base, "rm", "-f", "-v", PROMETHEUS_COMPOSE_SERVICE],
+        cwd=str(REPO_ROOT),
+        label="docker compose rm prometheus",
+    )
+    up = _run_command(
+        [*base, "up", "-d", "--force-recreate", PROMETHEUS_COMPOSE_SERVICE],
+        cwd=str(REPO_ROOT),
+        label="docker compose up prometheus",
+    )
+    return {
+        "ok": True,
+        "mode": "docker",
+        "command": " ; ".join([stop["command"], rm["command"], up["command"]]),
+        "message": "Prometheus recreated with empty TSDB (fresh install via docker compose).",
+        "fresh_install": True,
+    }
+
+
+def _reset_prometheus_kubernetes() -> dict[str, Any]:
+    """
+    Recreate Prometheus pods so emptyDir data is discarded (fresh TSDB).
+
+    The stock manifests mount an emptyDir at /prometheus; deleting pods yields a
+    clean volume. If a PVC is used instead, set PROMETHEUS_RESTART_CMD to wipe it.
+    """
+    if not shutil.which("kubectl"):
+        raise BigIPError(
+            "kubectl not found. Recreate Prometheus manually: "
+            f"kubectl -n {COLLECTOR_K8S_NAMESPACE} delete pod "
+            f"-l app.kubernetes.io/name=prometheus --wait=true",
+        )
+
+    delete = _run_command(
+        [
+            "kubectl",
+            "-n",
+            COLLECTOR_K8S_NAMESPACE,
+            "delete",
+            "pod",
+            "-l",
+            "app.kubernetes.io/name=prometheus",
+            "--wait=true",
+            "--timeout=120s",
+        ],
+        label="kubectl delete prometheus pods",
+    )
+    _run_command(
+        [
+            "kubectl",
+            "-n",
+            COLLECTOR_K8S_NAMESPACE,
+            "rollout",
+            "status",
+            PROMETHEUS_K8S_DEPLOYMENT,
+            "--timeout=120s",
+        ],
+        label="kubectl rollout status prometheus",
+    )
+    return {
+        "ok": True,
+        "mode": "kubernetes",
+        "command": delete["command"],
+        "message": (
+            "Prometheus pods recreated with empty TSDB "
+            "(fresh install; emptyDir wiped)."
+        ),
+        "fresh_install": True,
+    }
+
+
+def restart_prometheus() -> dict[str, Any]:
+    """Wipe Prometheus time-series data and bring it back as a fresh install."""
+    if cmd := os.environ.get("PROMETHEUS_RESTART_CMD", "").strip():
+        result = _run_command(shlex.split(cmd), label="PROMETHEUS_RESTART_CMD")
+        return {
+            "ok": True,
+            "mode": "custom",
+            "command": result["command"],
+            "message": "Prometheus reset command completed.",
+            "fresh_install": True,
+        }
+
+    mode = _detect_restart_mode()
+    if mode == "docker":
+        return _reset_prometheus_docker()
+    if mode == "kubernetes":
+        return _reset_prometheus_kubernetes()
+    raise BigIPError(
+        "Automatic Prometheus reset is not available in this environment. "
+        f"Run manually: docker compose -f {COMPOSE_FILE} up -d --force-recreate "
+        f"{PROMETHEUS_COMPOSE_SERVICE}",
+    )
 
 
 def control_status() -> dict[str, Any]:
