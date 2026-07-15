@@ -47,7 +47,9 @@ def _detect_restart_mode() -> str:
 
 def restart_hint(mode: str) -> str:
     if mode == "docker":
-        return f"docker compose -f {COMPOSE_FILE} restart {COLLECTOR_SERVICE}"
+        return (
+            f"docker compose -f {COMPOSE_FILE} up -d --force-recreate {COLLECTOR_SERVICE}"
+        )
     if mode == "kubernetes":
         return (
             f"kubectl -n {COLLECTOR_K8S_NAMESPACE} create configmap {COLLECTOR_K8S_CONFIGMAP} "
@@ -82,6 +84,43 @@ def _wait_collector_healthy(*, timeout_sec: float = 90.0) -> None:
         f"OpenTelemetry Collector did not become healthy at {url} within {int(timeout_sec)}s "
         f"({last_error})",
     )
+
+
+def _prometheus_scrape_url() -> str:
+    if url := os.environ.get("COLLECTOR_PROMETHEUS_URL", "").strip():
+        return url.rstrip("/")
+    host = os.environ.get("COLLECTOR_HEALTH_HOST", "127.0.0.1").strip()
+    port = os.environ.get("COLLECTOR_PROMETHEUS_PORT", "8889")
+    return f"http://{host}:{port}/metrics"
+
+
+def probe_prometheus_scrape(*, timeout_sec: float = 30.0) -> dict[str, Any]:
+    """
+    Confirm the collector Prometheus exporter is reachable from the API host.
+
+    Used after config apply so operators know metrics are scrapeable (port :8889)
+    on the same machine as docker compose — not necessarily the browser machine
+    when only the UI port is forwarded.
+    """
+    url = _prometheus_scrape_url()
+    deadline = time.time() + timeout_sec
+    last_error = ""
+    while time.time() < deadline:
+        try:
+            r = requests.get(url, timeout=5)
+            if r.status_code == 200:
+                body = r.text or ""
+                return {
+                    "ok": True,
+                    "url": url,
+                    "bytes": len(body),
+                    "has_samples": ("#" in body) or ("\n" in body and len(body) > 0),
+                }
+            last_error = f"status {r.status_code}"
+        except requests.RequestException as exc:
+            last_error = str(exc)
+        time.sleep(2)
+    return {"ok": False, "url": url, "error": last_error or "timeout"}
 
 
 def _run_command(
@@ -124,14 +163,24 @@ def _restart_docker() -> dict[str, Any]:
         raise BigIPError(f"docker-compose.yml not found at {COMPOSE_FILE}")
     if not shutil.which("docker"):
         raise BigIPError("docker not found in PATH")
-    cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "restart", COLLECTOR_SERVICE]
-    result = _run_command(cmd, cwd=str(REPO_ROOT), label="docker compose restart")
+    # Prefer up --force-recreate so exited containers come back (restart alone does not).
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(COMPOSE_FILE),
+        "up",
+        "-d",
+        "--force-recreate",
+        COLLECTOR_SERVICE,
+    ]
+    result = _run_command(cmd, cwd=str(REPO_ROOT), label="docker compose up otel-collector")
     _wait_collector_healthy()
     return {
         "ok": True,
         "mode": "docker",
         "command": result["command"],
-        "message": "OpenTelemetry Collector restarted (docker compose).",
+        "message": "OpenTelemetry Collector recreated (docker compose).",
     }
 
 

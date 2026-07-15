@@ -677,6 +677,7 @@ export default function App() {
       });
       const data = await readJson<{
         yaml: string;
+        path?: string;
         collector_restart?: {
           attempted?: boolean;
           ok?: boolean;
@@ -685,19 +686,33 @@ export default function App() {
           manual_hint?: string;
           skipped?: boolean;
         };
+        prometheus_scrape?: {
+          ok?: boolean;
+          url?: string;
+          error?: string;
+        };
       }>(r);
       setCollectorYaml(data.yaml);
       const restart = data.collector_restart;
+      const scrape = data.prometheus_scrape;
+      const pathHint = data.path ? ` Wrote ${data.path}.` : "";
+      const scrapeHint = scrape
+        ? scrape.ok
+          ? ` Prometheus scrape OK on API host (${scrape.url}). Open Prometheus UI on that same host (:9090), not only a port-forwarded browser tab.`
+          : ` Collector is up but Prometheus scrape failed on API host (${scrape.url}: ${scrape.error || "unreachable"}).`
+        : "";
       if (restart?.ok && restart.message) {
-        setCollectorActionStatus(restart.message);
+        setCollectorActionStatus(`${restart.message}${pathHint}${scrapeHint}`);
       } else if (restart?.attempted && restart.error) {
         setCollectorActionStatus(
           `Config saved, but collector restart failed: ${restart.error}${
             restart.manual_hint ? ` Try: ${restart.manual_hint}` : ""
-          }`,
+          }${pathHint}`,
         );
       } else if (restart?.skipped && restart.manual_hint) {
-        setCollectorActionStatus(`Config saved. Restart manually: ${restart.manual_hint}`);
+        setCollectorActionStatus(`Config saved. Restart manually: ${restart.manual_hint}${pathHint}`);
+      } else if (pathHint || scrapeHint) {
+        setCollectorActionStatus(`Config saved.${pathHint}${scrapeHint}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1620,7 +1635,7 @@ export default function App() {
           renderExporterSection(
             "metrics",
             "Metric exporters",
-            "Forward polled BIG-IP metrics (OTLP → collector). Add a metric exporter below or metrics are exposed on Prometheus scrape port :8889 (Prometheus UI on :9090 when using docker compose).",
+            "Forward polled BIG-IP metrics (OTLP → collector). With no metric exporters added, metrics are exposed on the collector Prometheus scrape port :8889. Open the Prometheus UI on the same host that runs docker compose (:9090) — if you only port-forward the app UI (:8001), localhost:9090 on your laptop is a different Prometheus.",
             metricExporters,
             setMetricExporters,
           )}

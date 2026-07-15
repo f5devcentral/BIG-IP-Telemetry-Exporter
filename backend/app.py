@@ -39,6 +39,7 @@ from backend.collector_config import (
 from backend.collector_ops import (
     auto_restart_enabled,
     control_status as collector_control_status,
+    probe_prometheus_scrape,
     restart_collector,
     restart_hint,
     restart_prometheus,
@@ -1166,6 +1167,10 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
             restart_hint(collector_control_status()["restart_mode"]),
         )
 
+    scrape_info: dict[str, Any] | None = None
+    if _collector_export_metrics and restart_info.get("ok"):
+        scrape_info = probe_prometheus_scrape()
+
     return {
         "ok": True,
         "path": str(path),
@@ -1175,6 +1180,7 @@ def apply_collector_config(body: CollectorConfigBody) -> dict[str, Any]:
         "export_metrics": _collector_export_metrics,
         "export_logs": _collector_export_logs,
         "collector_restart": restart_info,
+        "prometheus_scrape": scrape_info,
         "restart_command": restart_info.get("command")
         or restart_info.get("manual_hint")
         or restart_hint(collector_control_status()["restart_mode"]),
