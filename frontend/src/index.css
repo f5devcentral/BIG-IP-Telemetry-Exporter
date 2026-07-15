@@ -197,6 +197,15 @@ a:hover {
   color: var(--text);
 }
 
+.card-danger-zone {
+  border: 1px solid #b91c1c;
+  box-shadow: none;
+}
+
+.card-danger-zone h2 {
+  color: #b91c1c;
+}
+
 .card h2 {
   margin: 0 0 1rem;
   font-size: 1.1rem;

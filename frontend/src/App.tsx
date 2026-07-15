@@ -238,6 +238,7 @@ export default function App() {
     label: string;
     steps: unknown[];
   } | null>(null);
+  const [nukeResult, setNukeResult] = useState<Record<string, unknown> | null>(null);
 
   /** Latest endpoint selection per session; source of truth while toggling across modules. */
   const metricEndpointsRef = useRef<Record<string, Set<string>>>({});
@@ -811,6 +812,68 @@ export default function App() {
       setBusy(false);
     }
   }, []);
+
+  const nukeApplication = useCallback(async () => {
+    const confirmed = window.confirm(
+      "NUKE / full reset\n\n" +
+        "This will:\n" +
+        "• Stop metrics/log export\n" +
+        "• Roll back AS3 log profiles and system syslog on every connected BIG-IP\n" +
+        "• Disconnect all BIG-IP sessions and clear saved credentials on disk\n" +
+        "• Reset collector exporters to defaults and restart the collector when possible\n" +
+        "• Wipe and recreate local Prometheus (empty TSDB / fresh install) when possible\n\n" +
+        "Profiles still attached to virtual servers may block AS3 deletion — detach them first if needed.\n\n" +
+        "Continue?",
+    );
+    if (!confirmed) return;
+    const typed = window.prompt('Type NUKE to confirm full reset:', "");
+    if (typed !== "NUKE") {
+      setError("Nuke cancelled — confirmation text did not match.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNukeResult(null);
+    setRollbackResult(null);
+    try {
+      const r = await apiFetch("/api/nuke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirm: true,
+          rollback_bigip: true,
+          reset_collector: true,
+          restart_collector: true,
+          restart_prometheus: true,
+        }),
+      });
+      const data = await readJson<Record<string, unknown>>(r);
+      setNukeResult(data);
+      setDevices([]);
+      setExportDeviceIds(new Set());
+      setConfiguringSessionId("");
+      metricEndpointsRef.current = {};
+      setMetricExporters([]);
+      setLogExporters([]);
+      setCollectorYaml("");
+      setCollectorActionStatus(null);
+      setExportStatus({ running: false });
+      setModuleFilter("");
+      setHost("");
+      setUsername("admin");
+      setPassword("");
+      setLabel("");
+      try {
+        await loadCollectorYaml();
+      } catch {
+        /* ignore preview reload failures after reset */
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [loadCollectorYaml]);
 
   const toggleEndpoint = (ep: string) => {
     if (!configuringSessionId) return;
@@ -1644,6 +1707,34 @@ export default function App() {
         </div>
         {exportStatus && (
           <pre className="report-pre">{JSON.stringify(exportStatus, null, 2)}</pre>
+        )}
+      </section>
+
+      <section className="card card-danger-zone">
+        <h2>Danger zone</h2>
+        <p className="muted">
+          Permanently reset this exporter instance: stop export, roll back log configuration on every
+          connected BIG-IP, disconnect all sessions (including encrypted credentials on disk),
+          restore default collector exporters, restart the collector, and wipe Prometheus to a
+          fresh empty TSDB. Requires typing <code>NUKE</code> to confirm.
+        </p>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={busy}
+            onClick={() => void nukeApplication()}
+          >
+            Nuke / reset application
+          </button>
+        </div>
+        {nukeResult && (
+          <div className="rollback-result">
+            <p>
+              <strong>Nuke result</strong>
+            </p>
+            <pre className="report-pre">{JSON.stringify(nukeResult, null, 2)}</pre>
+          </div>
         )}
       </section>
     </div>
