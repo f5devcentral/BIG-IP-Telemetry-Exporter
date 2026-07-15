@@ -1725,7 +1725,7 @@ export default function App() {
             disabled={busy}
             onClick={() => void nukeApplication()}
           >
-            Nuke / reset application
+            Reset Exporter
           </button>
         </div>
         {nukeResult && (
