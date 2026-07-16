@@ -1633,7 +1633,7 @@ export default function App() {
       <>
       <section className="card">
         <h2>
-          API endpoints/tmctl table (
+          API endpoints &amp; tmctl tables (
           {showTmctlModule ? filteredTmctlTables.length : filteredApis.length})
         </h2>
         <p className="muted">

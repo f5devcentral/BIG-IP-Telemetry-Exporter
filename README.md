@@ -134,7 +134,7 @@ flowchart TD
 |------|----------------|
 | **Connected status bar** (top, when ≥1 device) | Count, chips, export selection summary, **Refresh list**, auto-refresh every 45 seconds |
 | **BIG-IP connections** | Device list with export checkboxes, per-device log toggles (LTM/ASM/AFM/AVR when provisioned), system syslog, **Remove**, connect form |
-| **API endpoints/tmctl table** | iControl REST path catalog plus **TMCTL TABLES** module for tmctl stats |
+| **API endpoints & tmctl tables** | iControl REST path catalog plus **TMCTL TABLES** module for tmctl stats |
 | **OpenTelemetry Collector exporters** | Separate **metric** and **log** exporter sections; apply restarts collector |
 | **Export to collector** | OTLP metrics settings and poll interval |
 
@@ -266,7 +266,7 @@ Defaults pre-select stats endpoints. Prefer `.../stats` paths for time-series st
 
 ### 2b. Select tmctl tables (optional)
 
-In the **API endpoints/tmctl table** section, choose the **TMCTL TABLES** module filter to select tmctl stats tables (see [K000151935](https://my.f5.com/manage/s/article/K000151935)). Eleven tables are available (e.g. `proc_stat`, `tmm_stat`, `disk_latency_stat`).
+In the **API endpoints & tmctl tables** section, choose the **TMCTL TABLES** module filter to select tmctl stats tables (see [K000151935](https://my.f5.com/manage/s/article/K000151935)). Eleven tables are available (e.g. `proc_stat`, `tmm_stat`, `disk_latency_stat`).
 
 Numeric columns become gauges named `bigip_tmctl_<table>_<column>` with attributes such as `tmctl.name` / `tmctl.slot`. The BIG-IP user must be allowed to run bash util commands (`/mgmt/tm/util/bash`).
 
