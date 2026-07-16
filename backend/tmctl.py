@@ -13,35 +13,19 @@ from backend.bigip_client import BigIPError
 _TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NUMERIC_RE = re.compile(r"^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$")
 
-# Curated tmctl stats tables supported on all BIG-IP platforms (no per-device discovery).
+# Curated tmctl stats tables exposed in the UI (TMCTL TABLES module).
 TMCTL_STATS_TABLES: tuple[str, ...] = (
-    "virtual_server_stat",
     "virtual_server_cpu_stat",
     "tmm_stat",
-    "system_traffic_stat",
-    "system_cpu_info_stat",
-    "selfip_stat",
-    "proc_stat",
-    "pool_stat",
-    "pool_member_stat",
     "plane_proc_stat",
     "plane_cpu_stat",
-    "neighbor_stat",
-    "memory_usage_stat",
-    "memory_stat",
     "mcp_worker_stats",
-    "interface_stat",
-    "host_info_stat",
-    "ha_stat",
-    "fw_sendtovirtual_stats",
-    "fw_current_state_stat",
-    "dns_resolver_stat",
-    "disk_latency_stat",
-    "disk_info_stat",
-    "cpu_info_stat",
-    "avr_plugin_stats",
+    "proc_stat",
     "asm_memory_util_stats",
     "asm_cloud_services_stats",
+    "fw_sendtovirtual_stats",
+    "fw_current_state_stat",
+    "disk_latency_stat",
 )
 _TMCTL_STATS_TABLE_SET = frozenset(TMCTL_STATS_TABLES)
 
