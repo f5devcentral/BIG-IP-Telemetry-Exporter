@@ -4,6 +4,8 @@ Pull **metrics** from F5 BIG-IP iControl REST APIs and forward **logs** from BIG
 
 The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Configurator](https://github.com/gregcoward/BIG-IP-Telemetry-Streaming-Configurator): connect to one or more BIG-IPs, choose what to export, configure collector exporters, and start export.
 
+![example screenshot](/docs/images/scr1.png)
+
 ## Table of contents
 
 - [Architecture](#architecture)
@@ -65,7 +67,7 @@ The exporter authenticates to each BIG-IP with **iControl REST** using the crede
 ### How login works
 
 1. On **Connect**, the browser sends host, username, password, and TLS options to the local backend (`POST /api/connect`) over the same origin as the UI (typically `http://<host>:8001`).
-2. The backend opens HTTPS to the BIG-IP and `POST`s to `/mgmt/shared/authn/login` (TMOS login provider).
+2. The backend opens HTTPS to the BIG-IP and `POSTs to `/mgmt/shared/authn/login` (TMOS login provider).
 3. BIG-IP returns an auth token. The backend stores that token only in the in-memory `BigIPClient` session and sends it on later calls as the `X-F5-Auth-Token` header.
 4. After login, the backend attempts to **extend** the token lifetime (default login timeout is ~20 minutes; extension targets ~60 minutes when allowed by the platform).
 5. Metric polls and AS3 / syslog configuration use that token. On **401**, the client clears any stale token header, logs in again with the stored password, and retries the request.
@@ -577,7 +579,7 @@ chmod +x scripts/k8s-*.sh   # build, deploy, apply-collector-config, uninstall
 **Remote cluster** (registry):
 
 ```bash
-export IMAGE=ghcr.io/<you>/bigip-telemetry-exporter:1.0.1
+export IMAGE=ghcr.io/<you>/bigip-telemetry-exporter:1.0.0
 docker tag bigip-telemetry-exporter:latest "${IMAGE}"
 docker push "${IMAGE}"
 ```
