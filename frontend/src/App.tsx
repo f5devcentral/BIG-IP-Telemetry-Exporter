@@ -1624,7 +1624,6 @@ export default function App() {
       <section className="card">
         <h2>API endpoints ({filteredApis.length})</h2>
         <p className="muted">
-          Catalog from <code>data/bigip_apis.csv</code> ({apis.length} iControl REST paths).
           Endpoint selection is per BIG-IP and accumulates across module filters — choose LTM,
           then SYS (or any other group) without losing earlier selections. Stats paths are
           recommended for metrics.
