@@ -1742,8 +1742,9 @@ export default function App() {
       <section className="card">
         <h2>tmctl tables ({filteredTmctlTables.length})</h2>
         <p className="muted">
-          Poll TMM statistics via <code>tmctl</code> on the BIG-IP. Requires a user that can run
-          bash util commands.
+          Poll TMM statistics via <code>tmctl</code> on the BIG-IP. Numeric columns become OTLP
+          gauges named <code>bigip_tmctl_&lt;table&gt;_&lt;column&gt;</code>. Requires a user that
+          can run bash util commands.
         </p>
         {metricsDevices.length > 0 && (
           <div className="field">
