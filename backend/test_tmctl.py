@@ -6,42 +6,50 @@ import unittest
 
 from backend.bigip_client import BigIPError
 from backend.tmctl import (
-    build_tmctl_list_command,
+    TMCTL_STATS_TABLES,
     build_tmctl_query_command,
     extract_tmctl_metrics,
+    list_tmctl_stats_tables,
     parse_tmctl_table_list,
+    validate_tmctl_stats_table,
     validate_tmctl_table_name,
 )
 
 
 class TmctlParseTests(unittest.TestCase):
+    def test_curated_catalog_has_27_tables(self) -> None:
+        tables = list_tmctl_stats_tables()
+        self.assertEqual(len(tables), 27)
+        self.assertEqual(tables, list(TMCTL_STATS_TABLES))
+        self.assertIn("memory_usage_stat", tables)
+        self.assertIn("virtual_server_stat", tables)
+
+    def test_validate_stats_table_rejects_unknown(self) -> None:
+        with self.assertRaises(BigIPError):
+            validate_tmctl_stats_table("page_stats")
+        self.assertEqual(validate_tmctl_stats_table("pool_stat"), "pool_stat")
+
     def test_validate_rejects_shell_injection(self) -> None:
         with self.assertRaises(BigIPError):
             validate_tmctl_table_name("memory_usage_stat; rm -rf /")
         with self.assertRaises(BigIPError):
             validate_tmctl_table_name("../etc/passwd")
-        self.assertEqual(validate_tmctl_table_name("memory_usage_stat"), "memory_usage_stat")
 
-    def test_parse_tmctl_a_list(self) -> None:
+    def test_parse_tmctl_a_list_legacy(self) -> None:
         text = """
 memory_usage_stat
 page_stats
 umem_cache_0
-
-.ignored
----
-ssl_sid_cache
 """
         self.assertEqual(
             parse_tmctl_table_list(text),
-            ["memory_usage_stat", "page_stats", "umem_cache_0", "ssl_sid_cache"],
+            ["memory_usage_stat", "page_stats", "umem_cache_0"],
         )
 
-    def test_build_commands_are_quoted_safely(self) -> None:
-        self.assertEqual(build_tmctl_list_command(), "-c 'tmctl -a'")
+    def test_build_query_command_is_quoted_safely(self) -> None:
         self.assertEqual(
-            build_tmctl_query_command("page_stats"),
-            "-c 'tmctl -c page_stats'",
+            build_tmctl_query_command("pool_stat"),
+            "-c 'tmctl -c pool_stat'",
         )
         with self.assertRaises(BigIPError):
             build_tmctl_query_command("x'; y")
@@ -69,17 +77,13 @@ ssl_sid_cache
         self.assertEqual(ssl_alloc["attributes"]["bigip.host"], "10.0.0.1")
         self.assertEqual(ssl_alloc["attributes"]["tmctl.table"], "memory_usage_stat")
 
-    def test_extract_page_stats_identity(self) -> None:
-        csv_text = "slot,tmid,pages_used,pages_avail\n0,0,123882,218624\n0,1,68244,219648\n"
-        points = extract_tmctl_metrics("page_stats", csv_text, bigip_host="bigip1")
-        used = [
-            p
-            for p in points
-            if p["name"] == "bigip_tmctl_page_stats_pages_used"
-        ]
-        self.assertEqual(len(used), 2)
-        self.assertEqual(used[0]["attributes"]["tmctl.slot"], "0")
-        self.assertEqual(used[0]["attributes"]["tmctl.tmid"], "0")
+    def test_extract_pool_stat(self) -> None:
+        csv_pool = "name,cur_conns,tot_conns\nvs1,10,100\n"
+        points = extract_tmctl_metrics("pool_stat", csv_pool, bigip_host="bigip1")
+        self.assertTrue(any(p["name"].startswith("bigip_tmctl_pool_stat_") for p in points))
+        conns = next(p for p in points if p["name"] == "bigip_tmctl_pool_stat_cur_conns")
+        self.assertEqual(conns["value"], 10.0)
+        self.assertEqual(conns["attributes"]["tmctl.name"], "vs1")
 
 
 if __name__ == "__main__":

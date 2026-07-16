@@ -222,7 +222,6 @@ export default function App() {
   const [configuringSessionId, setConfiguringSessionId] = useState("");
   const [tmctlAvailable, setTmctlAvailable] = useState<string[]>([]);
   const [tmctlFilter, setTmctlFilter] = useState("");
-  const [tmctlLoading, setTmctlLoading] = useState(false);
 
   const [catalog, setCatalog] = useState<ExporterCatalogItem[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<string[]>([]);
@@ -331,9 +330,10 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const [apiRes, catRes] = await Promise.all([
+        const [apiRes, catRes, tmctlRes] = await Promise.all([
           apiFetch("/api/apis?metrics_only=false"),
           apiFetch("/api/exporters/catalog"),
+          apiFetch("/api/tmctl-tables"),
         ]);
         const apiData = await readJson<{
           apis: ApiRow[];
@@ -346,11 +346,13 @@ export default function App() {
           contrib_components?: ContribComponent[];
           contrib_repo_url?: string;
         }>(catRes);
+        const tmctlData = await readJson<{ tables: string[] }>(tmctlRes);
         setApis(apiData.apis);
         setCatalog(catData.exporters);
         setCatalogCategories(catData.categories ?? []);
         setContribComponents(catData.contrib_components ?? []);
         if (catData.contrib_repo_url) setContribRepoUrl(catData.contrib_repo_url);
+        setTmctlAvailable(tmctlData.tables ?? []);
         await refreshStatus();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -414,32 +416,6 @@ export default function App() {
     return tmctlAvailable.filter((t) => t.toLowerCase().includes(q));
   }, [tmctlAvailable, tmctlFilter]);
 
-  const loadTmctlTables = useCallback(async (sessionId: string) => {
-    if (!sessionId) {
-      setTmctlAvailable([]);
-      return;
-    }
-    setTmctlLoading(true);
-    try {
-      const r = await apiFetch(`/api/session/${encodeURIComponent(sessionId)}/tmctl-tables`);
-      const data = await readJson<{ tables: string[]; selected?: string[] }>(r);
-      setTmctlAvailable(data.tables ?? []);
-      if (data.selected) {
-        tmctlTablesRef.current[sessionId] = new Set(data.selected);
-        setDevices((prev) =>
-          prev.map((d) =>
-            d.session_id === sessionId ? { ...d, tmctl_tables: data.selected ?? [] } : d,
-          ),
-        );
-      }
-    } catch (e) {
-      setTmctlAvailable([]);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTmctlLoading(false);
-    }
-  }, []);
-
   const metricsDevices = useMemo(
     () => devices.filter((d) => d.export_metrics !== false),
     [devices],
@@ -450,10 +426,6 @@ export default function App() {
     return devices.some((d) => d.export_metrics !== false);
   }, [devices, connectExportMetrics]);
 
-  useEffect(() => {
-    if (!configuringSessionId || !showApiEndpoints) return;
-    void loadTmctlTables(configuringSessionId);
-  }, [configuringSessionId, showApiEndpoints, loadTmctlTables]);
   const moduleFilterOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const a of apis) {
@@ -1778,8 +1750,8 @@ export default function App() {
           >
             F5 K000151935
           </a>
-          ). Tables are discovered with <code>tmctl -a</code> through iControl{" "}
-          <code>/mgmt/tm/util/bash</code>. Numeric columns become OTLP gauges named{" "}
+          ). Select from the standard stats tables below (same set on all BIG-IPs).
+          Numeric columns become OTLP gauges named{" "}
           <code>bigip_tmctl_&lt;table&gt;_&lt;column&gt;</code>. Requires a user that can run
           bash util commands.
         </p>
@@ -1811,14 +1783,6 @@ export default function App() {
           </div>
         </div>
         <div className="actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!configuringSessionId || tmctlLoading}
-            onClick={() => void loadTmctlTables(configuringSessionId)}
-          >
-            {tmctlLoading ? "Loading…" : "Refresh from BIG-IP"}
-          </button>
           <button
             type="button"
             className="btn btn-secondary"
@@ -1856,11 +1820,9 @@ export default function App() {
               {filteredTmctlTables.length === 0 ? (
                 <tr>
                   <td colSpan={2} className="muted">
-                    {tmctlLoading
-                      ? "Discovering tables…"
-                      : configuringSessionId
-                        ? "No tables loaded. Click Refresh from BIG-IP (needs bash util access)."
-                        : "Connect a BIG-IP with metrics export enabled."}
+                    {configuringSessionId
+                      ? "No tables match the filter."
+                      : "Connect a BIG-IP with metrics export enabled."}
                   </td>
                 </tr>
               ) : (

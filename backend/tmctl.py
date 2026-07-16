@@ -13,6 +13,43 @@ from backend.bigip_client import BigIPError
 _TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NUMERIC_RE = re.compile(r"^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$")
 
+# Curated tmctl stats tables supported on all BIG-IP platforms (no per-device discovery).
+TMCTL_STATS_TABLES: tuple[str, ...] = (
+    "virtual_server_stat",
+    "virtual_server_cpu_stat",
+    "tmm_stat",
+    "system_traffic_stat",
+    "system_cpu_info_stat",
+    "selfip_stat",
+    "proc_stat",
+    "pool_stat",
+    "pool_member_stat",
+    "plane_proc_stat",
+    "plane_cpu_stat",
+    "neighbor_stat",
+    "memory_usage_stat",
+    "memory_stat",
+    "mcp_worker_stats",
+    "interface_stat",
+    "host_info_stat",
+    "ha_stat",
+    "fw_sendtovirtual_stats",
+    "fw_current_state_stat",
+    "dns_resolver_stat",
+    "disk_latency_stat",
+    "disk_info_stat",
+    "cpu_info_stat",
+    "avr_plugin_stats",
+    "asm_memory_util_stats",
+    "asm_cloud_services_stats",
+)
+_TMCTL_STATS_TABLE_SET = frozenset(TMCTL_STATS_TABLES)
+
+
+def list_tmctl_stats_tables() -> list[str]:
+    """Return the fixed catalog of tmctl stats tables exposed in the UI."""
+    return list(TMCTL_STATS_TABLES)
+
 
 def validate_tmctl_table_name(name: str) -> str:
     """Return a sanitized table name or raise BigIPError."""
@@ -21,6 +58,16 @@ def validate_tmctl_table_name(name: str) -> str:
         raise BigIPError(
             f"Invalid tmctl table name {name!r}; "
             "only letters, digits, and underscore are allowed.",
+        )
+    return cleaned
+
+
+def validate_tmctl_stats_table(name: str) -> str:
+    """Ensure the table is in the curated stats catalog."""
+    cleaned = validate_tmctl_table_name(name)
+    if cleaned not in _TMCTL_STATS_TABLE_SET:
+        raise BigIPError(
+            f"tmctl table {name!r} is not in the supported stats catalog.",
         )
     return cleaned
 
@@ -119,7 +166,7 @@ def extract_tmctl_metrics(
     Metric names: ``bigip_tmctl_<table>_<column>``.
     Row identity columns become attributes (``tmctl.name``, ``tmctl.slot``, …).
     """
-    table_name = validate_tmctl_table_name(table)
+    table_name = validate_tmctl_stats_table(table)
     text = (csv_text or "").strip()
     if not text:
         return []
@@ -170,13 +217,8 @@ def extract_tmctl_metrics(
     return points
 
 
-def build_tmctl_list_command() -> str:
-    """Bash -c payload that lists available tmctl tables."""
-    return "-c 'tmctl -a'"
-
-
 def build_tmctl_query_command(table: str) -> str:
     """Bash -c payload that dumps a single table as CSV."""
-    name = validate_tmctl_table_name(table)
+    name = validate_tmctl_stats_table(table)
     # -c = CSV; safer for parsing across tmctl versions.
     return f"-c 'tmctl -c {name}'"

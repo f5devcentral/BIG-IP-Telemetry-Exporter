@@ -314,13 +314,6 @@ class BigIPClient:
             )
         return str(result.get("commandResult") or "")
 
-    def list_tmctl_tables(self) -> list[str]:
-        """Discover tmctl tables via ``tmctl -a`` on the BIG-IP."""
-        from backend.tmctl import build_tmctl_list_command, parse_tmctl_table_list
-
-        text = self.run_bash(build_tmctl_list_command())
-        return parse_tmctl_table_list(text)
-
     def query_tmctl_table(self, table: str) -> str:
         """Return CSV text for one tmctl table (``tmctl -c <table>``)."""
         from backend.tmctl import build_tmctl_query_command

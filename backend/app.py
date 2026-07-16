@@ -485,7 +485,7 @@ def _apply_metric_endpoints_by_session(endpoints_by_session: dict[str, list[str]
 
 
 def _apply_tmctl_tables_by_session(tables_by_session: dict[str, list[str]]) -> None:
-    from backend.tmctl import validate_tmctl_table_name
+    from backend.tmctl import validate_tmctl_stats_table
 
     for sid, tables in tables_by_session.items():
         sess = _sessions.get(sid)
@@ -494,7 +494,7 @@ def _apply_tmctl_tables_by_session(tables_by_session: dict[str, list[str]]) -> N
         cleaned: list[str] = []
         for raw in tables:
             try:
-                cleaned.append(validate_tmctl_table_name(str(raw)))
+                cleaned.append(validate_tmctl_stats_table(str(raw)))
             except BigIPError:
                 continue
         sess.tmctl_tables = cleaned
@@ -1076,14 +1076,22 @@ def update_metric_endpoints(session_id: str, body: MetricEndpointsBody) -> dict[
     }
 
 
+@app.get("/api/tmctl-tables")
+def list_tmctl_tables_catalog() -> dict[str, Any]:
+    """Fixed catalog of tmctl stats tables available for export."""
+    from backend.tmctl import list_tmctl_stats_tables
+
+    tables = list_tmctl_stats_tables()
+    return {"tables": tables, "count": len(tables)}
+
+
 @app.get("/api/session/{session_id}/tmctl-tables")
-def list_session_tmctl_tables(session_id: str) -> dict[str, Any]:
-    """Discover available tmctl tables on a connected BIG-IP (``tmctl -a``)."""
+def get_session_tmctl_tables(session_id: str) -> dict[str, Any]:
+    """Return curated tmctl stats tables and the session's current selection."""
+    from backend.tmctl import list_tmctl_stats_tables
+
     s = _get_session(session_id)
-    try:
-        tables = s.client.list_tmctl_tables()
-    except BigIPError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    tables = list_tmctl_stats_tables()
     return {
         "session_id": session_id,
         "tables": tables,
@@ -1095,13 +1103,13 @@ def list_session_tmctl_tables(session_id: str) -> dict[str, Any]:
 @app.patch("/api/session/{session_id}/tmctl-tables")
 def update_tmctl_tables(session_id: str, body: TmctlTablesBody) -> dict[str, Any]:
     global _export_config
-    from backend.tmctl import validate_tmctl_table_name
+    from backend.tmctl import validate_tmctl_stats_table
 
     s = _get_session(session_id)
     cleaned: list[str] = []
     for raw in body.tables:
         try:
-            cleaned.append(validate_tmctl_table_name(str(raw)))
+            cleaned.append(validate_tmctl_stats_table(str(raw)))
         except BigIPError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     s.tmctl_tables = cleaned
