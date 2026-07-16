@@ -965,7 +965,6 @@ export default function App() {
       setConfiguringSessionId("");
       metricEndpointsRef.current = {};
       tmctlTablesRef.current = {};
-      setTmctlAvailable([]);
       setTmctlFilter("");
       setMetricExporters([]);
       setLogExporters([]);
