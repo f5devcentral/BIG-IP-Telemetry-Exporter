@@ -3,6 +3,7 @@ import f5LogoUrl from "../../F5-logo-F5-rgb.svg";
 
 const THEME_STORAGE_KEY = "bigip-telemetry-ui-theme";
 const DEFAULT_OTLP_ENDPOINT = "http://127.0.0.1:4318";
+const TMCTL_MODULE = "TMCTL TABLES";
 type ThemeMode = "light" | "dark" | "system";
 
 type ApiRow = {
@@ -221,7 +222,6 @@ export default function App() {
   const [moduleFilter, setModuleFilter] = useState("");
   const [configuringSessionId, setConfiguringSessionId] = useState("");
   const [tmctlAvailable, setTmctlAvailable] = useState<string[]>([]);
-  const [tmctlFilter, setTmctlFilter] = useState("");
 
   const [catalog, setCatalog] = useState<ExporterCatalogItem[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<string[]>([]);
@@ -410,11 +410,9 @@ export default function App() {
     [configuringDevice],
   );
 
-  const filteredTmctlTables = useMemo(() => {
-    const q = tmctlFilter.trim().toLowerCase();
-    if (!q) return tmctlAvailable;
-    return tmctlAvailable.filter((t) => t.toLowerCase().includes(q));
-  }, [tmctlAvailable, tmctlFilter]);
+  const filteredTmctlTables = tmctlAvailable;
+
+  const showTmctlModule = moduleFilter === TMCTL_MODULE;
 
   const metricsDevices = useMemo(
     () => devices.filter((d) => d.export_metrics !== false),
@@ -433,10 +431,14 @@ export default function App() {
       if (!mod) continue;
       counts.set(mod, (counts.get(mod) ?? 0) + 1);
     }
-    return Array.from(counts.entries())
+    const apiOptions = Array.from(counts.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([mod, total]) => ({ mod, total }));
-  }, [apis]);
+    return [
+      ...apiOptions,
+      { mod: TMCTL_MODULE, total: tmctlAvailable.length },
+    ];
+  }, [apis, tmctlAvailable]);
 
   const filteredApis = useMemo(() => {
     return apis.filter((a) => {
@@ -882,7 +884,8 @@ export default function App() {
           endpoints_by_session: endpointsBySession,
           tmctl_tables_by_session: tmctlBySession,
           metrics_only: metricsOnly,
-          modules: moduleFilter ? [moduleFilter] : [],
+          modules:
+            moduleFilter && moduleFilter !== TMCTL_MODULE ? [moduleFilter] : [],
           poll_interval_sec: pollInterval,
           otlp_endpoint: DEFAULT_OTLP_ENDPOINT,
         }),
@@ -965,7 +968,6 @@ export default function App() {
       setConfiguringSessionId("");
       metricEndpointsRef.current = {};
       tmctlTablesRef.current = {};
-      setTmctlFilter("");
       setMetricExporters([]);
       setLogExporters([]);
       setCollectorYaml("");
@@ -1047,6 +1049,15 @@ export default function App() {
     );
     void updateDeviceMetricEndpoints(configuringSessionId, next);
   };
+
+  const configuringVisibleTmctlCount = useMemo(() => {
+    const visible = new Set(filteredTmctlTables);
+    let count = 0;
+    for (const table of configuringTmctlSet) {
+      if (visible.has(table)) count += 1;
+    }
+    return count;
+  }, [configuringTmctlSet, filteredTmctlTables]);
 
   const configuringVisibleCount = useMemo(() => {
     const visible = new Set(filteredApis.map((a) => a.endpoint));
@@ -1621,11 +1632,16 @@ export default function App() {
       {showApiEndpoints && (
       <>
       <section className="card">
-        <h2>API endpoints ({filteredApis.length})</h2>
+        <h2>
+          API endpoints/tmctl table (
+          {showTmctlModule ? filteredTmctlTables.length : filteredApis.length})
+        </h2>
         <p className="muted">
           Endpoint selection is per BIG-IP and accumulates across module filters — choose LTM,
           then SYS (or any other group) without losing earlier selections. Stats paths are
-          recommended for metrics.
+          recommended for metrics. Choose the <code>{TMCTL_MODULE}</code> module to select tmctl
+          stats tables (polled via bash util; numeric columns become OTLP gauges named{" "}
+          <code>bigip_tmctl_&lt;table&gt;_&lt;column&gt;</code>).
         </p>
         {metricsDevices.length > 0 && (
           <div className="field">
@@ -1636,21 +1652,24 @@ export default function App() {
             >
               {metricsDevices.map((d) => (
                 <option key={d.session_id} value={d.session_id}>
-                  {d.label || d.display_host} ({d.metric_endpoints?.length ?? 0} selected)
+                  {d.label || d.display_host} (
+                  {(d.metric_endpoints?.length ?? 0) + (d.tmctl_tables?.length ?? 0)} selected)
                 </option>
               ))}
             </select>
           </div>
         )}
         <div className="row">
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={metricsOnly}
-              onChange={(e) => setMetricsOnly(e.target.checked)}
-            />
-            Metrics / stats endpoints only
-          </label>
+          {!showTmctlModule ? (
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={metricsOnly}
+                onChange={(e) => setMetricsOnly(e.target.checked)}
+              />
+              Metrics / stats endpoints only
+            </label>
+          ) : null}
           <div className="field">
             <label>Module filter</label>
             <select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)}>
@@ -1665,18 +1684,34 @@ export default function App() {
         </div>
         {moduleFilter ? (
           <p className="muted">
-            Showing {filteredApis.length} path(s) for module <code>{moduleFilter}</code>
-            {metricsOnly
-              ? ` (${filteredMetricsCount} metrics-oriented)`
-              : ` (${filteredMetricsCount} with collect_metrics enabled)`}
+            {showTmctlModule ? (
+              <>
+                Showing {filteredTmctlTables.length} tmctl table(s) for module{" "}
+                <code>{moduleFilter}</code>
+              </>
+            ) : (
+              <>
+                Showing {filteredApis.length} path(s) for module <code>{moduleFilter}</code>
+                {metricsOnly
+                  ? ` (${filteredMetricsCount} metrics-oriented)`
+                  : ` (${filteredMetricsCount} with collect_metrics enabled)`}
+              </>
+            )}
           </p>
         ) : null}
         <div className="actions">
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={!configuringSessionId}
-            onClick={selectAllVisibleEndpoints}
+            disabled={
+              !configuringSessionId ||
+              (showTmctlModule
+                ? filteredTmctlTables.length === 0
+                : filteredApis.length === 0)
+            }
+            onClick={() =>
+              showTmctlModule ? selectAllVisibleTmctl() : selectAllVisibleEndpoints()
+            }
           >
             Select all visible
           </button>
@@ -1684,15 +1719,22 @@ export default function App() {
             type="button"
             className="btn btn-secondary"
             disabled={!configuringSessionId}
-            onClick={clearVisibleEndpoints}
+            onClick={() => (showTmctlModule ? clearVisibleTmctl() : clearVisibleEndpoints())}
           >
             Clear visible
           </button>
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={!configuringSessionId || configuringEndpointSet.size === 0}
-            onClick={() => setConfiguringEndpoints([])}
+            disabled={
+              !configuringSessionId ||
+              (showTmctlModule
+                ? configuringTmctlSet.size === 0
+                : configuringEndpointSet.size === 0)
+            }
+            onClick={() =>
+              showTmctlModule ? clearAllTmctl() : setConfiguringEndpoints([])
+            }
           >
             Clear all
           </button>
@@ -1703,131 +1745,54 @@ export default function App() {
               <tr>
                 <th />
                 <th>Module</th>
-                <th>Endpoint</th>
-                <th>Description</th>
+                <th>{showTmctlModule ? "Table" : "Endpoint"}</th>
+                {!showTmctlModule ? <th>Description</th> : null}
               </tr>
             </thead>
             <tbody>
-              {filteredApis.map((a) => (
-                <tr key={a.endpoint}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={configuringEndpointSet.has(a.endpoint)}
-                      disabled={!configuringSessionId}
-                      onChange={() => toggleEndpoint(a.endpoint)}
-                    />
-                  </td>
-                  <td>{a.module}</td>
-                  <td>
-                    <code>{a.endpoint}</code>
-                  </td>
-                  <td>{a.description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="muted">
-          {configuringDevice
-            ? moduleFilter
-              ? `${configuringEndpointSet.size} endpoint(s) selected for ${configuringDevice.label || configuringDevice.display_host} (${configuringVisibleCount} visible in ${moduleFilter}; others remain selected when you switch modules)`
-              : `${configuringEndpointSet.size} endpoint(s) selected for ${configuringDevice.label || configuringDevice.display_host}`
-            : "Connect a BIG-IP with metrics export enabled to configure endpoints."}
-        </p>
-      </section>
-
-      <section className="card">
-        <h2>tmctl tables ({filteredTmctlTables.length})</h2>
-        <p className="muted">
-          Poll TMM statistics via <code>tmctl</code> on the BIG-IP. Numeric columns become OTLP
-          gauges named <code>bigip_tmctl_&lt;table&gt;_&lt;column&gt;</code>. Requires a user that
-          can run bash util commands.
-        </p>
-        {metricsDevices.length > 0 && (
-          <div className="field">
-            <label>Configure tmctl for</label>
-            <select
-              value={configuringSessionId}
-              onChange={(e) => setConfiguringSessionId(e.target.value)}
-            >
-              {metricsDevices.map((d) => (
-                <option key={d.session_id} value={d.session_id}>
-                  {d.label || d.display_host} ({d.tmctl_tables?.length ?? 0} selected)
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div className="row">
-          <div className="field">
-            <label>Filter tables</label>
-            <input
-              type="text"
-              value={tmctlFilter}
-              onChange={(e) => setTmctlFilter(e.target.value)}
-              placeholder="e.g. memory_usage_stat"
-              disabled={!configuringSessionId}
-            />
-          </div>
-        </div>
-        <div className="actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!configuringSessionId || filteredTmctlTables.length === 0}
-            onClick={selectAllVisibleTmctl}
-          >
-            Select all visible
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!configuringSessionId}
-            onClick={clearVisibleTmctl}
-          >
-            Clear visible
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!configuringSessionId || configuringTmctlSet.size === 0}
-            onClick={clearAllTmctl}
-          >
-            Clear all
-          </button>
-        </div>
-        <div className="api-table-wrap">
-          <table className="api-table">
-            <thead>
-              <tr>
-                <th />
-                <th>Table</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTmctlTables.length === 0 ? (
-                <tr>
-                  <td colSpan={2} className="muted">
-                    {configuringSessionId
-                      ? "No tables match the filter."
-                      : "Connect a BIG-IP with metrics export enabled."}
-                  </td>
-                </tr>
+              {showTmctlModule ? (
+                filteredTmctlTables.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      {configuringSessionId
+                        ? "No tmctl tables available."
+                        : "Connect a BIG-IP with metrics export enabled."}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTmctlTables.map((table) => (
+                    <tr key={table}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={configuringTmctlSet.has(table)}
+                          disabled={!configuringSessionId}
+                          onChange={() => toggleTmctlTable(table)}
+                        />
+                      </td>
+                      <td>{TMCTL_MODULE}</td>
+                      <td>
+                        <code>{table}</code>
+                      </td>
+                    </tr>
+                  ))
+                )
               ) : (
-                filteredTmctlTables.map((table) => (
-                  <tr key={table}>
+                filteredApis.map((a) => (
+                  <tr key={a.endpoint}>
                     <td>
                       <input
                         type="checkbox"
-                        checked={configuringTmctlSet.has(table)}
+                        checked={configuringEndpointSet.has(a.endpoint)}
                         disabled={!configuringSessionId}
-                        onChange={() => toggleTmctlTable(table)}
+                        onChange={() => toggleEndpoint(a.endpoint)}
                       />
                     </td>
+                    <td>{a.module}</td>
                     <td>
-                      <code>{table}</code>
+                      <code>{a.endpoint}</code>
                     </td>
+                    <td>{a.description}</td>
                   </tr>
                 ))
               )}
@@ -1836,10 +1801,14 @@ export default function App() {
         </div>
         <p className="muted">
           {configuringDevice
-            ? `${configuringTmctlSet.size} tmctl table(s) selected for ${
-                configuringDevice.label || configuringDevice.display_host
-              }`
-            : "Connect a BIG-IP with metrics export enabled to configure tmctl tables."}
+            ? showTmctlModule
+              ? moduleFilter
+                ? `${configuringTmctlSet.size} tmctl table(s) selected for ${configuringDevice.label || configuringDevice.display_host} (${configuringVisibleTmctlCount} visible in ${moduleFilter}; others remain selected when you switch modules)`
+                : `${configuringTmctlSet.size} tmctl table(s) selected for ${configuringDevice.label || configuringDevice.display_host}`
+              : moduleFilter
+                ? `${configuringEndpointSet.size} endpoint(s) selected for ${configuringDevice.label || configuringDevice.display_host} (${configuringVisibleCount} visible in ${moduleFilter}; others remain selected when you switch modules)`
+                : `${configuringEndpointSet.size} endpoint(s) selected for ${configuringDevice.label || configuringDevice.display_host}`
+            : "Connect a BIG-IP with metrics export enabled to configure endpoints."}
         </p>
       </section>
       </>
