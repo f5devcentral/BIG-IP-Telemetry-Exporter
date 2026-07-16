@@ -1742,17 +1742,7 @@ export default function App() {
       <section className="card">
         <h2>tmctl tables ({filteredTmctlTables.length})</h2>
         <p className="muted">
-          Poll TMM statistics via <code>tmctl</code> on the BIG-IP (
-          <a
-            href="https://my.f5.com/manage/s/article/K000151935"
-            target="_blank"
-            rel="noreferrer"
-          >
-            F5 K000151935
-          </a>
-          ). Select from the standard stats tables below (same set on all BIG-IPs).
-          Numeric columns become OTLP gauges named{" "}
-          <code>bigip_tmctl_&lt;table&gt;_&lt;column&gt;</code>. Requires a user that can run
+          Poll TMM statistics via <code>tmctl</code> on the BIG-IP. Requires a user that can run
           bash util commands.
         </p>
         {metricsDevices.length > 0 && (
