@@ -108,6 +108,9 @@ def session_record_from_dict(session_id: str, data: dict[str, Any]) -> dict[str,
         "metric_endpoints": [
             str(ep) for ep in (data.get("metric_endpoints") or []) if str(ep).strip()
         ],
+        "tmctl_tables": [
+            str(t) for t in (data.get("tmctl_tables") or []) if str(t).strip()
+        ],
     }
 
 

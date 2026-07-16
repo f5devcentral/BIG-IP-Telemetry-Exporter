@@ -110,6 +110,7 @@ type BigIPDevice = {
   connected_since?: number;
   has_log_resources?: boolean;
   metric_endpoints?: string[];
+  tmctl_tables?: string[];
 };
 
 function exportModeLabel(device: BigIPDevice): string {
@@ -219,6 +220,9 @@ export default function App() {
   const [metricsOnly, setMetricsOnly] = useState(true);
   const [moduleFilter, setModuleFilter] = useState("");
   const [configuringSessionId, setConfiguringSessionId] = useState("");
+  const [tmctlAvailable, setTmctlAvailable] = useState<string[]>([]);
+  const [tmctlFilter, setTmctlFilter] = useState("");
+  const [tmctlLoading, setTmctlLoading] = useState(false);
 
   const [catalog, setCatalog] = useState<ExporterCatalogItem[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<string[]>([]);
@@ -244,6 +248,9 @@ export default function App() {
   const metricEndpointsRef = useRef<Record<string, Set<string>>>({});
   /** Serialize PATCH requests per session so out-of-order responses cannot drop selections. */
   const endpointSaveChainRef = useRef<Record<string, Promise<void>>>({});
+  /** Latest tmctl table selection per session. */
+  const tmctlTablesRef = useRef<Record<string, Set<string>>>({});
+  const tmctlSaveChainRef = useRef<Record<string, Promise<void>>>({});
 
   useEffect(() => {
     const resolved = resolveTheme(themeMode);
@@ -256,10 +263,13 @@ export default function App() {
     const data = await readJson<{ devices: BigIPDevice[] }>(r);
     setDevices(data.devices);
     const nextRefs: Record<string, Set<string>> = {};
+    const nextTmctl: Record<string, Set<string>> = {};
     for (const d of data.devices) {
       nextRefs[d.session_id] = new Set(d.metric_endpoints ?? []);
+      nextTmctl[d.session_id] = new Set(d.tmctl_tables ?? []);
     }
     metricEndpointsRef.current = nextRefs;
+    tmctlTablesRef.current = nextTmctl;
     setExportDeviceIds((prev) => {
       const ids = new Set(data.devices.map((d) => d.session_id));
       if (prev.size === 0) return ids;
@@ -295,10 +305,13 @@ export default function App() {
     if (data.connected_devices?.length !== undefined) {
       setDevices(data.connected_devices);
       const nextRefs: Record<string, Set<string>> = {};
+      const nextTmctl: Record<string, Set<string>> = {};
       for (const d of data.connected_devices) {
         nextRefs[d.session_id] = new Set(d.metric_endpoints ?? []);
+        nextTmctl[d.session_id] = new Set(d.tmctl_tables ?? []);
       }
       metricEndpointsRef.current = nextRefs;
+      tmctlTablesRef.current = nextTmctl;
     }
     const cfg = data.export_config;
     if (cfg) {
@@ -390,6 +403,43 @@ export default function App() {
     [configuringDevice],
   );
 
+  const configuringTmctlSet = useMemo(
+    () => new Set(configuringDevice?.tmctl_tables ?? []),
+    [configuringDevice],
+  );
+
+  const filteredTmctlTables = useMemo(() => {
+    const q = tmctlFilter.trim().toLowerCase();
+    if (!q) return tmctlAvailable;
+    return tmctlAvailable.filter((t) => t.toLowerCase().includes(q));
+  }, [tmctlAvailable, tmctlFilter]);
+
+  const loadTmctlTables = useCallback(async (sessionId: string) => {
+    if (!sessionId) {
+      setTmctlAvailable([]);
+      return;
+    }
+    setTmctlLoading(true);
+    try {
+      const r = await apiFetch(`/api/session/${encodeURIComponent(sessionId)}/tmctl-tables`);
+      const data = await readJson<{ tables: string[]; selected?: string[] }>(r);
+      setTmctlAvailable(data.tables ?? []);
+      if (data.selected) {
+        tmctlTablesRef.current[sessionId] = new Set(data.selected);
+        setDevices((prev) =>
+          prev.map((d) =>
+            d.session_id === sessionId ? { ...d, tmctl_tables: data.selected ?? [] } : d,
+          ),
+        );
+      }
+    } catch (e) {
+      setTmctlAvailable([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTmctlLoading(false);
+    }
+  }, []);
+
   const metricsDevices = useMemo(
     () => devices.filter((d) => d.export_metrics !== false),
     [devices],
@@ -400,6 +450,10 @@ export default function App() {
     return devices.some((d) => d.export_metrics !== false);
   }, [devices, connectExportMetrics]);
 
+  useEffect(() => {
+    if (!configuringSessionId || !showApiEndpoints) return;
+    void loadTmctlTables(configuringSessionId);
+  }, [configuringSessionId, showApiEndpoints, loadTmctlTables]);
   const moduleFilterOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const a of apis) {
@@ -650,6 +704,72 @@ export default function App() {
     [refreshDevices],
   );
 
+  const updateDeviceTmctlTables = useCallback(
+    (sessionId: string, tables: string[]) => {
+      tmctlTablesRef.current[sessionId] = new Set(tables);
+      setError(null);
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.session_id === sessionId ? { ...d, tmctl_tables: tables } : d,
+        ),
+      );
+
+      const saveToServer = async () => {
+        while (true) {
+          const pending = Array.from(tmctlTablesRef.current[sessionId] ?? []);
+          try {
+            const r = await apiFetch(
+              `/api/session/${encodeURIComponent(sessionId)}/tmctl-tables`,
+              {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tables: pending }),
+              },
+            );
+            const data = await readJson<{ device: BigIPDevice; export_restarted?: boolean }>(r);
+            const saved = data.device.tmctl_tables ?? [];
+            const desired = Array.from(tmctlTablesRef.current[sessionId] ?? []);
+            const sentAllPending =
+              pending.length === desired.length && pending.every((t) => desired.includes(t));
+            if (sentAllPending) {
+              tmctlTablesRef.current[sessionId] = new Set(saved);
+              setDevices((prev) =>
+                prev.map((d) => (d.session_id === sessionId ? data.device : d)),
+              );
+            }
+            if (data.export_restarted) {
+              const statusRes = await apiFetch("/api/export/status");
+              const statusData = await readJson<{
+                loop: Record<string, unknown>;
+                log_forwarding?: Record<string, unknown>;
+              }>(statusRes);
+              setExportStatus({
+                ...statusData.loop,
+                log_forwarding: statusData.log_forwarding,
+              });
+            }
+            const latest = Array.from(tmctlTablesRef.current[sessionId] ?? []);
+            const savedSet = new Set(saved);
+            const synced =
+              latest.length === saved.length && latest.every((t) => savedSet.has(t));
+            if (synced) break;
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            await refreshDevices();
+            break;
+          }
+        }
+      };
+
+      tmctlSaveChainRef.current[sessionId] = (
+        tmctlSaveChainRef.current[sessionId] ?? Promise.resolve()
+      )
+        .catch(() => undefined)
+        .then(saveToServer);
+    },
+    [refreshDevices],
+  );
+
   const toggleExportDevice = (sessionId: string) => {
     setExportDeviceIds((prev) => {
       const next = new Set(prev);
@@ -761,22 +881,25 @@ export default function App() {
       (d) =>
         exportDeviceIds.has(d.session_id) &&
         d.export_metrics !== false &&
-        (d.metric_endpoints?.length ?? 0) === 0,
+        (d.metric_endpoints?.length ?? 0) === 0 &&
+        (d.tmctl_tables?.length ?? 0) === 0,
     );
     if (metricsDevicesMissing.length > 0) {
       const names = metricsDevicesMissing
         .map((d) => d.label || d.display_host)
         .join(", ");
-      setError(`Select metric API endpoints for: ${names}`);
+      setError(`Select metric API endpoints and/or tmctl tables for: ${names}`);
       return;
     }
     setBusy(true);
     setError(null);
     try {
       const endpointsBySession: Record<string, string[]> = {};
+      const tmctlBySession: Record<string, string[]> = {};
       for (const d of devices) {
         if (sessionIds.includes(d.session_id) && d.export_metrics !== false) {
           endpointsBySession[d.session_id] = d.metric_endpoints ?? [];
+          tmctlBySession[d.session_id] = d.tmctl_tables ?? [];
         }
       }
       const r = await apiFetch("/api/export/start", {
@@ -785,6 +908,7 @@ export default function App() {
         body: JSON.stringify({
           session_ids: sessionIds,
           endpoints_by_session: endpointsBySession,
+          tmctl_tables_by_session: tmctlBySession,
           metrics_only: metricsOnly,
           modules: moduleFilter ? [moduleFilter] : [],
           poll_interval_sec: pollInterval,
@@ -868,6 +992,9 @@ export default function App() {
       setExportDeviceIds(new Set());
       setConfiguringSessionId("");
       metricEndpointsRef.current = {};
+      tmctlTablesRef.current = {};
+      setTmctlAvailable([]);
+      setTmctlFilter("");
       setMetricExporters([]);
       setLogExporters([]);
       setCollectorYaml("");
@@ -896,6 +1023,35 @@ export default function App() {
     if (current.has(ep)) current.delete(ep);
     else current.add(ep);
     void updateDeviceMetricEndpoints(configuringSessionId, Array.from(current));
+  };
+
+  const toggleTmctlTable = (table: string) => {
+    if (!configuringSessionId) return;
+    const current = new Set(tmctlTablesRef.current[configuringSessionId] ?? []);
+    if (current.has(table)) current.delete(table);
+    else current.add(table);
+    void updateDeviceTmctlTables(configuringSessionId, Array.from(current));
+  };
+
+  const selectAllVisibleTmctl = () => {
+    if (!configuringSessionId) return;
+    const merged = new Set(tmctlTablesRef.current[configuringSessionId] ?? []);
+    for (const t of filteredTmctlTables) merged.add(t);
+    void updateDeviceTmctlTables(configuringSessionId, Array.from(merged));
+  };
+
+  const clearVisibleTmctl = () => {
+    if (!configuringSessionId) return;
+    const visible = new Set(filteredTmctlTables);
+    const next = Array.from(tmctlTablesRef.current[configuringSessionId] ?? []).filter(
+      (t) => !visible.has(t),
+    );
+    void updateDeviceTmctlTables(configuringSessionId, next);
+  };
+
+  const clearAllTmctl = () => {
+    if (!configuringSessionId) return;
+    void updateDeviceTmctlTables(configuringSessionId, []);
   };
 
   const setConfiguringEndpoints = (endpoints: string[]) => {
@@ -1296,6 +1452,7 @@ export default function App() {
                       ({exportModeLabel(d)}
                       {d.export_metrics !== false
                         ? `, ${d.metric_endpoints?.length ?? 0} metric endpoints`
+                          + `${(d.tmctl_tables?.length ?? 0) > 0 ? `, ${d.tmctl_tables?.length} tmctl` : ""}`
                         : ""}
                       )
                     </span>
@@ -1491,6 +1648,7 @@ export default function App() {
       </section>
 
       {showApiEndpoints && (
+      <>
       <section className="card">
         <h2>API endpoints ({filteredApis.length})</h2>
         <p className="muted">
@@ -1608,6 +1766,132 @@ export default function App() {
             : "Connect a BIG-IP with metrics export enabled to configure endpoints."}
         </p>
       </section>
+
+      <section className="card">
+        <h2>tmctl tables ({filteredTmctlTables.length})</h2>
+        <p className="muted">
+          Poll TMM statistics via <code>tmctl</code> on the BIG-IP (
+          <a
+            href="https://my.f5.com/manage/s/article/K000151935"
+            target="_blank"
+            rel="noreferrer"
+          >
+            F5 K000151935
+          </a>
+          ). Tables are discovered with <code>tmctl -a</code> through iControl{" "}
+          <code>/mgmt/tm/util/bash</code>. Numeric columns become OTLP gauges named{" "}
+          <code>bigip_tmctl_&lt;table&gt;_&lt;column&gt;</code>. Requires a user that can run
+          bash util commands.
+        </p>
+        {metricsDevices.length > 0 && (
+          <div className="field">
+            <label>Configure tmctl for</label>
+            <select
+              value={configuringSessionId}
+              onChange={(e) => setConfiguringSessionId(e.target.value)}
+            >
+              {metricsDevices.map((d) => (
+                <option key={d.session_id} value={d.session_id}>
+                  {d.label || d.display_host} ({d.tmctl_tables?.length ?? 0} selected)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="row">
+          <div className="field">
+            <label>Filter tables</label>
+            <input
+              type="text"
+              value={tmctlFilter}
+              onChange={(e) => setTmctlFilter(e.target.value)}
+              placeholder="e.g. memory_usage_stat"
+              disabled={!configuringSessionId}
+            />
+          </div>
+        </div>
+        <div className="actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!configuringSessionId || tmctlLoading}
+            onClick={() => void loadTmctlTables(configuringSessionId)}
+          >
+            {tmctlLoading ? "Loading…" : "Refresh from BIG-IP"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!configuringSessionId || filteredTmctlTables.length === 0}
+            onClick={selectAllVisibleTmctl}
+          >
+            Select all visible
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!configuringSessionId}
+            onClick={clearVisibleTmctl}
+          >
+            Clear visible
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={!configuringSessionId || configuringTmctlSet.size === 0}
+            onClick={clearAllTmctl}
+          >
+            Clear all
+          </button>
+        </div>
+        <div className="api-table-wrap">
+          <table className="api-table">
+            <thead>
+              <tr>
+                <th />
+                <th>Table</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTmctlTables.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="muted">
+                    {tmctlLoading
+                      ? "Discovering tables…"
+                      : configuringSessionId
+                        ? "No tables loaded. Click Refresh from BIG-IP (needs bash util access)."
+                        : "Connect a BIG-IP with metrics export enabled."}
+                  </td>
+                </tr>
+              ) : (
+                filteredTmctlTables.map((table) => (
+                  <tr key={table}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={configuringTmctlSet.has(table)}
+                        disabled={!configuringSessionId}
+                        onChange={() => toggleTmctlTable(table)}
+                      />
+                    </td>
+                    <td>
+                      <code>{table}</code>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted">
+          {configuringDevice
+            ? `${configuringTmctlSet.size} tmctl table(s) selected for ${
+                configuringDevice.label || configuringDevice.display_host
+              }`
+            : "Connect a BIG-IP with metrics export enabled to configure tmctl tables."}
+        </p>
+      </section>
+      </>
       )}
 
       <section className="card">
@@ -1682,8 +1966,8 @@ export default function App() {
                   <span className="connected-chip-label">{d.label || d.display_host}</span>
                   <span className="connected-chip-host">{d.display_host}</span>
                   {d.export_metrics !== false && (
-                    <span className="connected-chip-export" title="Metric endpoints">
-                      {d.metric_endpoints?.length ?? 0} ep
+                    <span className="connected-chip-export" title="Metric endpoints / tmctl">
+                      {(d.metric_endpoints?.length ?? 0) + (d.tmctl_tables?.length ?? 0)} src
                     </span>
                   )}
                 </li>

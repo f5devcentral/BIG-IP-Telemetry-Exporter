@@ -135,6 +135,7 @@ class _Session:
     prov_afm: bool = False
     prov_avr: bool = False
     metric_endpoints: list[str] = field(default_factory=list)
+    tmctl_tables: list[str] = field(default_factory=list)
 
 
 _sessions: dict[str, _Session] = {}
@@ -185,6 +186,7 @@ def _session_persist_payload(session_id: str, sess: _Session) -> dict[str, Any]:
             "prov_afm": sess.prov_afm,
             "prov_avr": sess.prov_avr,
             "metric_endpoints": list(sess.metric_endpoints),
+            "tmctl_tables": list(sess.tmctl_tables),
         },
     )
 
@@ -279,6 +281,9 @@ def _session_from_record(record: dict[str, Any]) -> _Session:
         prov_avr=bool(record.get("prov_avr", False)),
         metric_endpoints=[
             str(ep) for ep in (record.get("metric_endpoints") or []) if str(ep).strip()
+        ],
+        tmctl_tables=[
+            str(t) for t in (record.get("tmctl_tables") or []) if str(t).strip()
         ],
     )
 
@@ -417,6 +422,7 @@ def _session_to_dict(session_id: str, sess: _Session) -> dict[str, Any]:
         "connected_since": sess.created,
         "has_log_resources": session_has_log_resources(sess),
         "metric_endpoints": list(sess.metric_endpoints),
+        "tmctl_tables": list(sess.tmctl_tables),
     }
 
 
@@ -449,6 +455,11 @@ def _resolve_metric_endpoints_for_session(sess: _Session) -> list[str]:
     return list(sess.metric_endpoints)
 
 
+def _resolve_tmctl_tables_for_session(sess: _Session) -> list[str]:
+    """Return selected tmctl tables for a session (empty means none)."""
+    return list(sess.tmctl_tables)
+
+
 def _live_metric_endpoints_for_session(session_id: str) -> list[str]:
     """Resolve the current metric endpoints for a session (used each export poll)."""
     sess = _sessions.get(session_id)
@@ -457,12 +468,36 @@ def _live_metric_endpoints_for_session(session_id: str) -> list[str]:
     return _resolve_metric_endpoints_for_session(sess)
 
 
+def _live_tmctl_tables_for_session(session_id: str) -> list[str]:
+    """Resolve selected tmctl tables for a session (used each export poll)."""
+    sess = _sessions.get(session_id)
+    if not sess or not sess.export_metrics:
+        return []
+    return _resolve_tmctl_tables_for_session(sess)
+
+
 def _apply_metric_endpoints_by_session(endpoints_by_session: dict[str, list[str]]) -> None:
     for sid, eps in endpoints_by_session.items():
         sess = _sessions.get(sid)
         if not sess:
             continue
         sess.metric_endpoints = [ep.strip() for ep in eps if ep.strip()]
+
+
+def _apply_tmctl_tables_by_session(tables_by_session: dict[str, list[str]]) -> None:
+    from backend.tmctl import validate_tmctl_table_name
+
+    for sid, tables in tables_by_session.items():
+        sess = _sessions.get(sid)
+        if not sess:
+            continue
+        cleaned: list[str] = []
+        for raw in tables:
+            try:
+                cleaned.append(validate_tmctl_table_name(str(raw)))
+            except BigIPError:
+                continue
+        sess.tmctl_tables = cleaned
 
 
 def _export_start_body_from_config() -> ExportStartBody | None:
@@ -476,6 +511,7 @@ def _export_start_body_from_config() -> ExportStartBody | None:
     return ExportStartBody(
         session_ids=session_ids,
         endpoints_by_session=dict(_export_config.get("endpoints_by_session") or {}),
+        tmctl_tables_by_session=dict(_export_config.get("tmctl_tables_by_session") or {}),
         metrics_only=bool(_export_config.get("metrics_only", True)),
         modules=list(_export_config.get("modules") or []),
         poll_interval_sec=float(_export_config.get("poll_interval_sec", 30)),
@@ -586,6 +622,10 @@ class ExportStartBody(BaseModel):
         default_factory=dict,
         description="Per-device metric API paths from the UI; applied before export starts",
     )
+    tmctl_tables_by_session: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Per-device tmctl table names from the UI; applied before export starts",
+    )
     metrics_only: bool = True
     modules: list[str] = Field(default_factory=list)
     poll_interval_sec: float = 30.0
@@ -619,6 +659,10 @@ class LogOptionsBody(BaseModel):
 
 class MetricEndpointsBody(BaseModel):
     endpoints: list[str] = Field(default_factory=list)
+
+
+class TmctlTablesBody(BaseModel):
+    tables: list[str] = Field(default_factory=list)
 
 
 class RollbackBody(BaseModel):
@@ -884,6 +928,7 @@ def connect(body: ConnectBody, request: Request) -> ConnectResponse:
             prov_afm=prov_afm,
             prov_avr=prov_avr,
             metric_endpoints=[],
+            tmctl_tables=[],
         )
         _persist_runtime_state()
         return ConnectResponse(
@@ -1015,6 +1060,58 @@ def update_metric_endpoints(session_id: str, body: MetricEndpointsBody) -> dict[
             **_export_config,
             "endpoints_by_session": by_session,
             "endpoints": sorted({ep for eps in by_session.values() for ep in eps}),
+        }
+    _persist_runtime_state()
+    export_restarted = False
+    if _export_loop and _export_loop.status.get("running") and _export_config:
+        try:
+            _restart_active_export()
+            export_restarted = True
+        except HTTPException:
+            pass
+    return {
+        "ok": True,
+        "device": _session_to_dict(session_id, s),
+        "export_restarted": export_restarted,
+    }
+
+
+@app.get("/api/session/{session_id}/tmctl-tables")
+def list_session_tmctl_tables(session_id: str) -> dict[str, Any]:
+    """Discover available tmctl tables on a connected BIG-IP (``tmctl -a``)."""
+    s = _get_session(session_id)
+    try:
+        tables = s.client.list_tmctl_tables()
+    except BigIPError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "session_id": session_id,
+        "tables": tables,
+        "selected": list(s.tmctl_tables),
+        "count": len(tables),
+    }
+
+
+@app.patch("/api/session/{session_id}/tmctl-tables")
+def update_tmctl_tables(session_id: str, body: TmctlTablesBody) -> dict[str, Any]:
+    global _export_config
+    from backend.tmctl import validate_tmctl_table_name
+
+    s = _get_session(session_id)
+    cleaned: list[str] = []
+    for raw in body.tables:
+        try:
+            cleaned.append(validate_tmctl_table_name(str(raw)))
+        except BigIPError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    s.tmctl_tables = cleaned
+    if _export_config and _export_config.get("active"):
+        by_session = dict(_export_config.get("tmctl_tables_by_session") or {})
+        by_session[session_id] = list(s.tmctl_tables)
+        _export_config = {
+            **_export_config,
+            "tmctl_tables_by_session": by_session,
+            "tmctl_tables": sorted({t for tables in by_session.values() for t in tables}),
         }
     _persist_runtime_state()
     export_restarted = False
@@ -1225,12 +1322,14 @@ def _resolve_export_sessions(
         label = sess.label or _display_host(sess.host)
         if sess.export_metrics:
             endpoints = _resolve_metric_endpoints_for_session(sess)
-            if not endpoints:
+            tables = _resolve_tmctl_tables_for_session(sess)
+            if not endpoints and not tables:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        f"No metric endpoints selected for {label}. "
-                        "Configure API endpoints for this BIG-IP before starting export."
+                        f"No metric sources selected for {label}. "
+                        "Configure API endpoints and/or tmctl tables for this BIG-IP "
+                        "before starting export."
                     ),
                 )
             metrics_clients.append(
@@ -1253,13 +1352,20 @@ def _start_export(body: ExportStartBody) -> dict[str, Any]:
     global _export_loop, _pusher, _log_export, _export_config
     if body.endpoints_by_session:
         _apply_metric_endpoints_by_session(body.endpoints_by_session)
+    if body.tmctl_tables_by_session:
+        _apply_tmctl_tables_by_session(body.tmctl_tables_by_session)
     metrics_clients, log_hosts = _resolve_export_sessions(body.session_ids)
     resolved_session_ids = body.session_ids if body.session_ids else list(_sessions.keys())
     endpoints_by_session = {
         sid: _live_metric_endpoints_for_session(sid)
         for _, sid, _ in metrics_clients
     }
+    tmctl_tables_by_session = {
+        sid: _live_tmctl_tables_for_session(sid)
+        for _, sid, _ in metrics_clients
+    }
     endpoints_used = sorted({ep for eps in endpoints_by_session.values() for ep in eps})
+    tmctl_used = sorted({t for tables in tmctl_tables_by_session.values() for t in tables})
 
     log_cfg = runtime_log_config()
     _log_export = {
@@ -1294,6 +1400,7 @@ def _start_export(body: ExportStartBody) -> dict[str, Any]:
             metrics_clients,
             _pusher,
             _live_metric_endpoints_for_session,
+            tmctl_resolver=_live_tmctl_tables_for_session,
             poll_interval_sec=body.poll_interval_sec,
         )
         result = _export_loop.run_once()
@@ -1302,6 +1409,8 @@ def _start_export(body: ExportStartBody) -> dict[str, Any]:
             {
                 "endpoints": sum(len(eps) for eps in endpoints_by_session.values()),
                 "endpoints_by_session": endpoints_by_session,
+                "tmctl_tables": sum(len(t) for t in tmctl_tables_by_session.values()),
+                "tmctl_tables_by_session": tmctl_tables_by_session,
                 "first_run": result,
                 "status": _export_loop.status,
             },
@@ -1315,6 +1424,8 @@ def _start_export(body: ExportStartBody) -> dict[str, Any]:
         "session_ids": resolved_session_ids,
         "endpoints": endpoints_used,
         "endpoints_by_session": endpoints_by_session,
+        "tmctl_tables": tmctl_used,
+        "tmctl_tables_by_session": tmctl_tables_by_session,
         "metrics_only": body.metrics_only,
         "modules": list(body.modules),
         "poll_interval_sec": body.poll_interval_sec,

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # (display host, session_id, client)
 BigIPClientEntry = tuple[str, str, Any]
 EndpointResolver = Callable[[str], list[str]]
+TmctlResolver = Callable[[str], list[str]]
 
 
 class OTLPMetricsPusher:
@@ -110,11 +111,13 @@ class MetricsExportLoop:
         pusher: OTLPMetricsPusher,
         endpoint_resolver: EndpointResolver,
         *,
+        tmctl_resolver: TmctlResolver | None = None,
         poll_interval_sec: float = 30.0,
     ) -> None:
         self._clients = clients
         self._pusher = pusher
         self._endpoint_resolver = endpoint_resolver
+        self._tmctl_resolver = tmctl_resolver or (lambda _sid: [])
         self._poll_interval_sec = poll_interval_sec
         self._running = False
         self._stop_event = threading.Event()
@@ -124,11 +127,16 @@ class MetricsExportLoop:
         self._last_point_count = 0
         self._last_errors_by_host: dict[str, list[str]] = {}
         self._last_endpoints_by_host: dict[str, list[str]] = {}
+        self._last_tmctl_by_host: dict[str, list[str]] = {}
 
     @property
     def status(self) -> dict[str, Any]:
         endpoints_by_host = {
             host: self._endpoint_resolver(sid)
+            for host, sid, _ in self._clients
+        }
+        tmctl_by_host = {
+            host: self._tmctl_resolver(sid)
             for host, sid, _ in self._clients
         }
         return {
@@ -138,6 +146,8 @@ class MetricsExportLoop:
                 host: len(eps) for host, eps in endpoints_by_host.items()
             },
             "metric_endpoints_by_host": endpoints_by_host,
+            "tmctl_table_count": sum(len(t) for t in tmctl_by_host.values()),
+            "tmctl_tables_by_host": tmctl_by_host,
             "bigip_count": len(self._clients),
             "bigip_hosts": [h for h, _, _ in self._clients],
             "last_run": self._last_run,
@@ -145,21 +155,26 @@ class MetricsExportLoop:
             "last_point_count": self._last_point_count,
             "last_errors_by_host": self._last_errors_by_host,
             "last_endpoints_by_host": self._last_endpoints_by_host,
+            "last_tmctl_by_host": self._last_tmctl_by_host,
             "poll_interval_sec": self._poll_interval_sec,
             "otlp": self._pusher.status,
         }
 
     def run_once(self) -> dict[str, Any]:
         from .metrics_extractor import extract_metrics
+        from .tmctl import extract_tmctl_metrics
 
         total = 0
         errors: list[str] = []
         errors_by_host: dict[str, list[str]] = {}
         endpoints_by_host: dict[str, list[str]] = {}
+        tmctl_by_host: dict[str, list[str]] = {}
 
         for host, sid, client in self._clients:
             endpoints = self._endpoint_resolver(sid)
+            tables = self._tmctl_resolver(sid)
             endpoints_by_host[host] = endpoints
+            tmctl_by_host[host] = tables
             host_errors: list[str] = []
             for ep in endpoints:
                 try:
@@ -168,6 +183,15 @@ class MetricsExportLoop:
                     total += self._pusher.record_batch(points)
                 except Exception as exc:  # noqa: BLE001
                     msg = f"{ep}: {exc}"
+                    errors.append(f"[{host}] {msg}")
+                    host_errors.append(msg)
+            for table in tables:
+                try:
+                    csv_text = client.query_tmctl_table(table)
+                    points = extract_tmctl_metrics(table, csv_text, bigip_host=host)
+                    total += self._pusher.record_batch(points)
+                except Exception as exc:  # noqa: BLE001
+                    msg = f"tmctl/{table}: {exc}"
                     errors.append(f"[{host}] {msg}")
                     host_errors.append(msg)
             if host_errors:
@@ -180,12 +204,14 @@ class MetricsExportLoop:
         self._last_point_count = total
         self._last_errors_by_host = errors_by_host
         self._last_endpoints_by_host = endpoints_by_host
+        self._last_tmctl_by_host = tmctl_by_host
         self._last_error = "; ".join(errors[:8]) if errors else None
         return {
             "points": total,
             "errors": errors,
             "errors_by_host": errors_by_host,
             "endpoints_by_host": endpoints_by_host,
+            "tmctl_tables_by_host": tmctl_by_host,
             "flush_ok": flush_ok,
         }
 

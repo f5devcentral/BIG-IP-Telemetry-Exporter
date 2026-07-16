@@ -291,6 +291,42 @@ class BigIPClient:
         result = self.post("/mgmt/tm/sys/config", json_body={"command": "save"})
         return result if isinstance(result, dict) else {"ok": True}
 
+    def run_bash(self, util_cmd_args: str) -> str:
+        """
+        Run a command via ``POST /mgmt/tm/util/bash``.
+
+        ``util_cmd_args`` must start with ``-c`` (F5 util requirement), e.g.
+        ``-c 'tmctl -a'``. Returns the ``commandResult`` text.
+        """
+        args = (util_cmd_args or "").strip()
+        if not args.startswith("-c"):
+            raise BigIPError('utilCmdArgs must start with "-c" (e.g. -c \'tmctl -a\')')
+        result = self.post(
+            "/mgmt/tm/util/bash",
+            json_body={"command": "run", "utilCmdArgs": args},
+        )
+        if not isinstance(result, dict):
+            raise BigIPError("Unexpected response from /mgmt/tm/util/bash")
+        if "commandResult" not in result:
+            detail = str(result)[:400]
+            raise BigIPError(
+                f"/mgmt/tm/util/bash returned no commandResult: {detail}",
+            )
+        return str(result.get("commandResult") or "")
+
+    def list_tmctl_tables(self) -> list[str]:
+        """Discover tmctl tables via ``tmctl -a`` on the BIG-IP."""
+        from backend.tmctl import build_tmctl_list_command, parse_tmctl_table_list
+
+        text = self.run_bash(build_tmctl_list_command())
+        return parse_tmctl_table_list(text)
+
+    def query_tmctl_table(self, table: str) -> str:
+        """Return CSV text for one tmctl table (``tmctl -c <table>``)."""
+        from backend.tmctl import build_tmctl_query_command
+
+        return self.run_bash(build_tmctl_query_command(table))
+
     def upload_bytes(
         self,
         endpoint: str,

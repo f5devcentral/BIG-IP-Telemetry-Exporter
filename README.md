@@ -124,6 +124,7 @@ flowchart TD
 |------|------------|---------|
 | 1 | **BIG-IP connections** | Authenticate; enable per-device log types (LTM, ASM, AFM, AVR, system) based on provisioned modules |
 | 2 | **API endpoints** | Choose which `/mgmt/...` paths to poll for metrics (stats paths recommended) |
+| 2b | **tmctl tables** | Optional: discover tables via `tmctl -a` and poll TMM stats (e.g. `memory_usage_stat`) |
 | 3 | **OpenTelemetry Collector exporters** | Configure metric and log exporters separately; **Apply collector config** restarts the collector |
 | 4 | **Export to collector** | Metrics via OTLP; logs via syslog/tcplog receivers on the collector |
 
@@ -134,6 +135,7 @@ flowchart TD
 | **Connected status bar** (top, when ≥1 device) | Count, chips, export selection summary, **Refresh list**, auto-refresh every 45 seconds |
 | **BIG-IP connections** | Device list with export checkboxes, per-device log toggles (LTM/ASM/AFM/AVR when provisioned), system syslog, **Remove**, connect form |
 | **API endpoints** | iControl REST path catalog for metrics |
+| **tmctl tables** | Live `tmctl -a` catalog; selected tables polled via bash util |
 | **OpenTelemetry Collector exporters** | Separate **metric** and **log** exporter sections; apply restarts collector |
 | **Export to collector** | OTLP metrics settings and poll interval |
 
@@ -263,6 +265,14 @@ The catalog comes from [`data/bigip_apis.csv`](data/bigip_apis.csv) (103 paths; 
 
 Defaults pre-select stats endpoints. Prefer `.../stats` paths for time-series style counters and gauges.
 
+### 2b. Select tmctl tables (optional)
+
+In addition to iControl REST paths, you can poll TMM tables with `tmctl` (see [K000151935](https://my.f5.com/manage/s/article/K000151935)). The UI loads the live list via `tmctl -a` on the BIG-IP (through `/mgmt/tm/util/bash`). Examples: `memory_usage_stat`, `page_stats`.
+
+Numeric columns become gauges named `bigip_tmctl_<table>_<column>` with attributes such as `tmctl.name` / `tmctl.slot`. The BIG-IP user must be allowed to run bash util commands. Table names are allowlisted (letters, digits, underscore only).
+
+You can start export with REST endpoints only, tmctl tables only, or both.
+
 ### 3. Configure collector exporters (optional)
 
 The UI has two sections:
@@ -283,7 +293,7 @@ The UI has two sections:
 
 **Start export** runs when at least one connected device is checked for export:
 
-- **Metrics** — polls selected `/mgmt/.../stats` endpoints and sends OTLP metrics to the collector.
+- **Metrics** — polls selected `/mgmt/.../stats` endpoints and/or `tmctl` tables and sends OTLP metrics to the collector.
 - **Logs** — traffic from enabled BIG-IP logging profiles and system syslog reaches the collector on ports **5140** / **5141** (if those features were configured on connect).
 
 Export status (and **Refresh status**) shows `running`, device count, `last_point_count`, `last_errors_by_host`, and `poll_interval_sec`.
