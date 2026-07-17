@@ -280,8 +280,9 @@ The UI has two sections:
 - **Log exporters** — sinks for logs received on syslog `:5140` and tcplog `:5141`.
 
 1. Add or enable exporters in each section (for metrics, add a Prometheus scrape exporter, OTLP remote write, or other sink as needed).
-2. Click **Apply collector config** — writes `otel-collector/generated-config.yaml` and **restarts** the OpenTelemetry Collector (Docker Compose or `kubectl` when available).
-3. If restart fails, the UI shows a manual command. Set `COLLECTOR_AUTO_RESTART=false` to only write YAML without restarting.
+2. For HTTPS destinations with self-signed or untrusted certificates (e.g. Splunk HEC, OTLP, Elasticsearch), check **Skip TLS certificate verification** — this sets `tls.insecure_skip_verify: true` on the exporter.
+3. Click **Apply collector config** — writes `otel-collector/generated-config.yaml` and **restarts** the OpenTelemetry Collector (Docker Compose or `kubectl` when available).
+4. If restart fails, the UI shows a manual command. Set `COLLECTOR_AUTO_RESTART=false` to only write YAML without restarting.
 
 ### 4. Start export
 

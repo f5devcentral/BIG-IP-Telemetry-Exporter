@@ -152,6 +152,24 @@ def _split_csv(value: str) -> list[str]:
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
+# Shared field for exporters that use the standard collector TLS client settings.
+_SKIP_VERIFY_FIELD = FieldSpec(
+    "insecure_skip_verify",
+    "Skip TLS certificate verification",
+    field_type="bool",
+    default=False,
+)
+
+
+def _with_tls_skip_verify(cfg: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """Merge tls.insecure_skip_verify into an exporter config when requested."""
+    if bool(params.get("insecure_skip_verify", False)):
+        tls = cfg.setdefault("tls", {})
+        tls["insecure"] = False
+        tls["insecure_skip_verify"] = True
+    return cfg
+
+
 def _build_otlp_http(params: dict[str, Any]) -> dict[str, Any]:
     endpoint = str(_p(params, "endpoint", "http://localhost:4318"))
     base = endpoint.rstrip("/")
@@ -160,15 +178,16 @@ def _build_otlp_http(params: dict[str, Any]) -> dict[str, Any]:
         cfg["logs_endpoint"] = str(_p(params, "logs_endpoint", f"{base}/v1/logs"))
     else:
         cfg["metrics_endpoint"] = str(_p(params, "metrics_endpoint", f"{base}/v1/metrics"))
-    return cfg
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_otlp_grpc(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "endpoint": str(_p(params, "endpoint", "localhost:4317")),
         "compression": _p(params, "compression", "gzip"),
         "tls": {"insecure": bool(_p(params, "insecure", True))},
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_prometheus(params: dict[str, Any]) -> dict[str, Any]:
@@ -208,16 +227,24 @@ def _build_prometheusremotewrite(params: dict[str, Any]) -> dict[str, Any]:
             for line in str(params["headers"]).splitlines()
             if ":" in line
         }
-    return cfg
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_kafka(params: dict[str, Any]) -> dict[str, Any]:
     brokers = _split_csv(str(_p(params, "brokers", "localhost:9092")))
-    return {
+    cfg = {
         "brokers": brokers,
         "topic": str(_p(params, "topic", "otel-metrics")),
         "encoding": str(_p(params, "encoding", "otlp_proto")),
     }
+    if bool(params.get("insecure_skip_verify", False)):
+        cfg["auth"] = {
+            "tls": {
+                "insecure": False,
+                "insecure_skip_verify": True,
+            },
+        }
+    return cfg
 
 
 def _build_datadog(params: dict[str, Any]) -> dict[str, Any]:
@@ -235,10 +262,11 @@ def _build_signalfx(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_splunk_hec(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "token": str(_p(params, "token", "")),
         "endpoint": str(_p(params, "endpoint", "https://localhost:8088/services/collector")),
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_coralogix(params: dict[str, Any]) -> dict[str, Any]:
@@ -252,16 +280,17 @@ def _build_coralogix(params: dict[str, Any]) -> dict[str, Any]:
 
 def _build_elasticsearch(params: dict[str, Any]) -> dict[str, Any]:
     endpoints = _split_csv(str(_p(params, "endpoints", "http://localhost:9200")))
-    return {"endpoints": endpoints}
+    return _with_tls_skip_verify({"endpoints": endpoints}, params)
 
 
 def _build_influxdb(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "endpoint": str(_p(params, "endpoint", "http://localhost:8086")),
         "org": str(_p(params, "org", "")),
         "bucket": str(_p(params, "bucket", "")),
         "token": str(_p(params, "token", "")),
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_googlecloud(params: dict[str, Any]) -> dict[str, Any]:
@@ -298,14 +327,22 @@ def _build_azuremonitor(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_opensearch(params: dict[str, Any]) -> dict[str, Any]:
-    return {"endpoints": _split_csv(str(_p(params, "endpoints", "https://localhost:9200")))}
+    endpoints = _split_csv(str(_p(params, "endpoints", "https://localhost:9200")))
+    http: dict[str, Any] = {"endpoint": endpoints[0] if endpoints else ""}
+    if bool(params.get("insecure_skip_verify", False)):
+        http["tls"] = {
+            "insecure": False,
+            "insecure_skip_verify": True,
+        }
+    return {"http": http}
 
 
 def _build_logzio(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "token": str(_p(params, "token", "")),
         "region": str(_p(params, "region", "us")),
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_sumologic(params: dict[str, Any]) -> dict[str, Any]:
@@ -316,17 +353,21 @@ def _build_sumologic(params: dict[str, Any]) -> dict[str, Any]:
             "(Sumo Logic → Manage Data → Collection → Sources → HTTP Logs). "
             "Paste the full https://collectors.../receiver/v1/http/... URL."
         )
-    return {
-        "endpoint": endpoint,
-        "log_format": "otlp",
-    }
+    return _with_tls_skip_verify(
+        {
+            "endpoint": endpoint,
+            "log_format": "otlp",
+        },
+        params,
+    )
 
 
 def _build_mezmo(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "ingest_url": str(_p(params, "ingest_url", "https://api.mezmo.com/v1/ingest")),
         "ingest_key": str(_p(params, "ingest_key", "")),
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_pulsar(params: dict[str, Any]) -> dict[str, Any]:
@@ -344,10 +385,11 @@ def _build_rabbitmq(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_otelarrow(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "endpoint": str(_p(params, "endpoint", "localhost:4317")),
         "tls": {"insecure": bool(_p(params, "insecure", True))},
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_sematext(params: dict[str, Any]) -> dict[str, Any]:
@@ -358,10 +400,11 @@ def _build_sematext(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_syslog(params: dict[str, Any]) -> dict[str, Any]:
-    return {
+    cfg = {
         "endpoint": str(_p(params, "endpoint", "udp://localhost:514")),
         "network": str(_p(params, "network", "udp")),
     }
+    return _with_tls_skip_verify(cfg, params)
 
 
 def _build_clickhouse(params: dict[str, Any]) -> dict[str, Any]:
@@ -439,6 +482,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     default="gzip",
                     options=("gzip", "none"),
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_otlp_http,
         ),
@@ -460,6 +504,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     options=("gzip", "none"),
                 ),
                 FieldSpec("insecure", "TLS insecure", field_type="bool", default=True),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_otlp_grpc,
         ),
@@ -513,6 +558,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     field_type="textarea",
                     placeholder="Authorization: Bearer token",
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_prometheusremotewrite,
         ),
@@ -557,6 +603,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     "HEC endpoint",
                     default="https://localhost:8088/services/collector",
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_splunk_hec,
         ),
@@ -591,6 +638,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     default="http://localhost:9200",
                     required=True,
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_elasticsearch,
         ),
@@ -606,6 +654,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                 FieldSpec("org", "Organization"),
                 FieldSpec("bucket", "Bucket"),
                 FieldSpec("token", "Token", field_type="password"),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_influxdb,
         ),
@@ -627,6 +676,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     default="otlp_proto",
                     options=("otlp_proto", "otlp_json"),
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_kafka,
         ),
@@ -709,6 +759,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     "Endpoints (comma-separated)",
                     default="https://localhost:9200",
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_opensearch,
         ),
@@ -729,6 +780,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     default="us",
                     options=("us", "eu", "au", "ca", "uk"),
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_logzio,
         ),
@@ -747,6 +799,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     required=True,
                     placeholder="https://collectors.sumologic.com/receiver/v1/http/...",
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_sumologic,
         ),
@@ -761,6 +814,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
             fields=(
                 FieldSpec("ingest_key", "Ingest key", field_type="password", required=True),
                 FieldSpec("ingest_url", "Ingest URL", default="https://api.mezmo.com/v1/ingest"),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_mezmo,
         ),
@@ -804,6 +858,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
             fields=(
                 FieldSpec("endpoint", "Endpoint", default="localhost:4317"),
                 FieldSpec("insecure", "TLS insecure", field_type="bool", default=True),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_otelarrow,
         ),
@@ -843,6 +898,7 @@ def _curated_specs() -> tuple[ExporterSpec, ...]:
                     default="udp",
                     options=("udp", "tcp"),
                 ),
+                _SKIP_VERIFY_FIELD,
             ),
             build=_build_syslog,
         ),
