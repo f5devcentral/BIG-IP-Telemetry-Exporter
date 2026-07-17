@@ -1,6 +1,6 @@
 # BIG-IP Telemetry Exporter
 
-Pull **metrics** from F5 BIG-IP iControl REST APIs and forward **logs** from BIG-IP (LTM, ASM, AFM, AVR, and system syslog) to an [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector) using separate metric and log pipelines.
+Pull **metrics** and push **logs** from F5 BIG-IP iControl REST APIs and forward **logs** from BIG-IP (LTM, ASM, AFM, AVR, and system syslog) to an [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector) using separate metric and log pipelines.
 
 The React UI is styled similarly to [BIG-IP-Telemetry-Streaming-Validator-and-Configurator](https://github.com/gregcoward/BIG-IP-Telemetry-Streaming-Configurator): connect to one or more BIG-IPs, choose what to export, configure collector exporters, and start export.
 
